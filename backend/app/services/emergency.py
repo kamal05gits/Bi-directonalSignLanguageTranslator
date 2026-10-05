@@ -1,17 +1,14 @@
-"""Prototype emergency-phrase module.
+"""Emergency-phrase module.
 
-This is explicitly **not** connected to real emergency dispatch: there is no
-telephony, SMS gateway, or location service configured. What it gives a
-deaf/hard-of-hearing user is fast, one-tap access to a small set of
-pre-translated, high-value phrases that can be shown (large on-screen text)
-and spoken aloud to a bystander - useful on its own - plus an in-memory audit
-log of when an alert was raised, so a real provider (e.g. Twilio, a campus
-security webhook) has one obvious place to be plugged in later
-(:class:`EmergencyLog.record`).
+Phrases give a deaf/hard-of-hearing user fast, one-tap access to a small set
+of pre-translated, high-value texts that can be shown (large on-screen text)
+and spoken aloud to a bystander - useful on its own - plus an audit log of
+when an alert was raised and whether it was delivered.
 
-Every response from the API built on top of this module says plainly that no
-real service was contacted, matching the project's policy of never
-fabricating a capability it does not have.
+Real delivery is wired through :class:`app.services.twilio_notifier.TwilioNotifier`
+(SMS + voice call to a configured number). When Twilio is not configured the
+feature stays a prototype, and every API response says so plainly - matching
+the project's policy of never fabricating a capability it does not have.
 """
 
 from __future__ import annotations
@@ -48,6 +45,7 @@ def find_phrase(phrase_id: str) -> EmergencyPhrase | None:
 class EmergencyAlert:
     phrase_id: str
     language: str
+    delivery: str = "none"  # e.g. "sms+call", "sms", "none"
     timestamp: float = field(default_factory=time.time)
 
 
@@ -58,8 +56,8 @@ class EmergencyLog:
         self._alerts: list[EmergencyAlert] = []
         self._max_entries = max_entries
 
-    def record(self, phrase_id: str, language: str) -> EmergencyAlert:
-        alert = EmergencyAlert(phrase_id=phrase_id, language=language)
+    def record(self, phrase_id: str, language: str, delivery: str = "none") -> EmergencyAlert:
+        alert = EmergencyAlert(phrase_id=phrase_id, language=language, delivery=delivery)
         self._alerts.append(alert)
         del self._alerts[: -self._max_entries]
         return alert

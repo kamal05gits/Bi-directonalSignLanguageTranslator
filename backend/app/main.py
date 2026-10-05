@@ -1,6 +1,7 @@
 """FastAPI application for the bidirectional sign-language translator.
 
-Three recognition models are served behind one API:
+Three recognition models are served behind one API, and can be used one at
+a time or combined in a single soft-voting ensemble request:
 
 - ``alphabet``: single-frame 64x64 photo CNN (bundled, always deployable).
 - ``fingerspelling``: MLP over a 126-value MediaPipe hand-landmark vector
@@ -8,6 +9,12 @@ Three recognition models are served behind one API:
 - ``word``: CISLR word classifier over I3D video features. It needs the Git
   LFS checkpoint plus optional PyTorch/OpenCV dependencies, and reports itself
   honestly as unavailable when those are missing.
+- ``combined``: ``POST /api/predict/combined`` runs every provided input
+  through its model and merges the results (see ``app.services.ensemble``).
+
+Emergency alerts are delivered for real when Twilio is configured via
+environment variables (``app.services.twilio_notifier``), and stay a
+prototype that says so plainly when it is not.
 
 The heavy models are loaded lazily, so health checks remain responsive while a
 Render instance starts. The same service hosts the static web client and its
@@ -17,25 +24,28 @@ JSON API, avoiding CORS and cross-origin camera issues.
 from __future__ import annotations
 
 import io
+import json
 import logging
 import os
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from starlette.concurrency import run_in_threadpool
 from PIL import Image, ImageOps
-from pydantic import BaseModel, ConfigDict, Field
 
 from .language.translator import DictionaryTranslator
 from .routes import continuous as continuous_routes
 from .routes import emergency as emergency_routes
 from .routes import language as language_routes
 from .services.alphabet_predictor import AlphabetPredictor
+from .services.ensemble import EnsembleError, ModelSource, combine, not_run
 from .services.fingerspelling_predictor import FEATURE_DIM, FingerspellingPredictor
 from .services.keras_classifier import Prediction
+from .services.twilio_notifier import TwilioConfig, TwilioNotifier
 from .services.word_predictor import WordPredictor
 
 LOGGER = logging.getLogger(__name__)
@@ -60,13 +70,14 @@ VIDEO_CONTENT_TYPES = {"video/webm", "video/mp4", "video/quicktime", "video/x-ms
 
 app = FastAPI(
     title="Bidirectional Sign Language Translator",
-    description="Indian Sign Language recognition API: alphabet photo model, hand-landmark fingerspelling model, and CISLR word video model",
-    version="2.0.0",
+    description="Indian Sign Language recognition API: alphabet photo model, hand-landmark fingerspelling model, CISLR word video model, a soft-voting combined ensemble, and Twilio-backed emergency alerts",
+    version="2.1.0",
 )
 alphabet_predictor = AlphabetPredictor(MODEL, LABELS)
 fingerspelling_predictor = FingerspellingPredictor(FINGERSPELLING_MODEL, FINGERSPELLING_LABELS)
 word_predictor = WordPredictor(WORD_MODEL, WORD_LABELS, WORD_NORMALIZATION, I3D_WEIGHTS, I3D_CODE_DIR)
 translator = DictionaryTranslator()
+twilio_notifier = TwilioNotifier(TwilioConfig.from_env())
 
 
 class ModelHealth(BaseModel):
@@ -92,6 +103,26 @@ class PredictionResponse(BaseModel):
     label: str
     confidence: float = Field(ge=0, le=1)
     accepted: bool
+    top_predictions: list[PredictionItem]
+
+
+class CombinedSourceItem(BaseModel):
+    model: str
+    ran: bool
+    ok: bool
+    label: str | None = None
+    confidence: float | None = Field(None, ge=0, le=1)
+    detail: str
+
+
+class CombinedPredictionResponse(BaseModel):
+    label: str
+    confidence: float = Field(ge=0, le=1)
+    accepted: bool
+    agreement: bool | None
+    method: str
+    word: PredictionItem | None
+    sources: list[CombinedSourceItem]
     top_predictions: list[PredictionItem]
 
 
@@ -197,15 +228,12 @@ def predict_fingerspelling(payload: LandmarkRequest) -> PredictionResponse:
 async def predict_word(file: Annotated[UploadFile, File(description="Short WebM/MP4 clip of one signed word")]) -> PredictionResponse:
     if file.content_type not in VIDEO_CONTENT_TYPES:
         raise HTTPException(415, "Please upload a WebM, MP4, MOV, or AVI video clip.")
-    suffix = Path(file.filename or "").suffix.lower()
-    if suffix not in VIDEO_SUFFIXES:
-        suffix = ".webm" if file.content_type == "video/webm" else ".mp4"
     payload = await _read_upload(file, MAX_VIDEO_BYTES, "Video exceeds the 32 MB upload limit.")
     if not payload:
         raise HTTPException(400, "The uploaded video is empty.")
     try:
         # The I3D forward pass takes seconds on CPU; keep the event loop free.
-        result = await run_in_threadpool(word_predictor.predict_video, payload, suffix)
+        result = await run_in_threadpool(word_predictor.predict_video, payload, _video_suffix(file), 5)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     except RuntimeError as exc:
@@ -214,13 +242,178 @@ async def predict_word(file: Annotated[UploadFile, File(description="Short WebM/
     return _response(result, _confidence_threshold("WORD_CONFIDENCE_THRESHOLD", "0.30"))
 
 
+# --- Combined (all three models, one soft-voting prediction) ---------------
+
+
+def _video_suffix(file: UploadFile) -> str:
+    suffix = Path(file.filename or "").suffix.lower()
+    if suffix not in VIDEO_SUFFIXES:
+        suffix = ".webm" if file.content_type == "video/webm" else ".mp4"
+    return suffix
+
+
+def _parse_landmarks_field(raw: str | None) -> tuple[list[float] | None, str | None]:
+    """Parse the JSON landmark form field into (values, error)."""
+    if raw is None or not raw.strip():
+        return None, None
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError:
+        return None, f"Landmarks must be a JSON array of {FEATURE_DIM} numbers."
+    try:
+        return LandmarkRequest(landmarks=value).landmarks, None
+    except ValidationError:
+        return None, f"Landmarks must be a JSON array of exactly {FEATURE_DIM} finite numbers."
+
+
+def _success_source(model: str, results: list[Prediction]) -> ModelSource:
+    return ModelSource(
+        model,
+        ran=True,
+        ok=True,
+        label=results[0].label,
+        confidence=results[0].confidence,
+        top_predictions=results,
+        detail="ok",
+    )
+
+
+async def _run_alphabet_source(file: UploadFile) -> ModelSource:
+    if not alphabet_predictor.available:
+        return ModelSource("alphabet", ran=True, detail="Alphabet model files are missing.")
+    try:
+        payload = await _read_upload(file, MAX_UPLOAD_BYTES, "Image exceeds the 5 MB upload limit.")
+        image = _decode_image(file, payload)
+        result = await run_in_threadpool(alphabet_predictor.predict, image, len(alphabet_predictor.labels))
+    except HTTPException as exc:
+        return ModelSource("alphabet", ran=True, detail=str(exc.detail), client_error=True)
+    except (OSError, ValueError, RuntimeError) as exc:
+        LOGGER.exception("Alphabet prediction failed in combined request")
+        return ModelSource("alphabet", ran=True, detail=f"Alphabet model failed: {exc}")
+    return _success_source("alphabet", result)
+
+
+async def _run_fingerspelling_source(raw: str) -> ModelSource:
+    values, error = _parse_landmarks_field(raw)
+    if error:
+        return ModelSource("fingerspelling", ran=True, detail=error, client_error=True)
+    if not fingerspelling_predictor.available:
+        return ModelSource("fingerspelling", ran=True, detail="Fingerspelling model files are missing.")
+    try:
+        result = await run_in_threadpool(
+            fingerspelling_predictor.predict, values, len(fingerspelling_predictor.labels)
+        )
+    except ValueError as exc:
+        return ModelSource("fingerspelling", ran=True, detail=str(exc), client_error=True)
+    except (RuntimeError, OSError) as exc:
+        LOGGER.exception("Fingerspelling prediction failed in combined request")
+        return ModelSource("fingerspelling", ran=True, detail=f"Fingerspelling model failed: {exc}")
+    return _success_source("fingerspelling", result)
+
+
+async def _run_word_source(file: UploadFile) -> ModelSource:
+    word_available, word_detail = word_predictor.availability()
+    if not word_available:
+        return ModelSource("word", ran=True, detail=f"Word model is unavailable: {word_detail}")
+    if file.content_type not in VIDEO_CONTENT_TYPES:
+        return ModelSource(
+            "word", ran=True, detail="Please upload a WebM, MP4, MOV, or AVI video clip.", client_error=True
+        )
+    try:
+        payload = await _read_upload(file, MAX_VIDEO_BYTES, "Video exceeds the 32 MB upload limit.")
+        if not payload:
+            return ModelSource("word", ran=True, detail="The uploaded video is empty.", client_error=True)
+        result = await run_in_threadpool(word_predictor.predict_video, payload, _video_suffix(file), 5)
+    except HTTPException as exc:
+        return ModelSource("word", ran=True, detail=str(exc.detail), client_error=True)
+    except (ValueError, RuntimeError, OSError) as exc:
+        LOGGER.exception("Word prediction failed in combined request")
+        return ModelSource("word", ran=True, detail=f"Word model failed: {exc}")
+    return _success_source("word", result)
+
+
+@app.post("/api/predict/combined", response_model=CombinedPredictionResponse)
+async def predict_combined(
+    image: Annotated[
+        UploadFile | None, File(description="JPEG/PNG/WebP frame for the alphabet photo model")
+    ] = None,
+    landmarks: Annotated[
+        str | None, Form(description=f"JSON array of {FEATURE_DIM} wrist-relative hand-landmark values")
+    ] = None,
+    video: Annotated[UploadFile | None, File(description="Short WebM/MP4 clip for the word model")] = None,
+) -> CombinedPredictionResponse:
+    """Run every provided input through its model and combine them into one prediction.
+
+    Send any mix of ``image`` (alphabet CNN), ``landmarks`` (fingerspelling
+    MLP), and ``video`` (word model). Each model that gets input runs, the two
+    letter models are merged with a soft vote, and the word model is kept as
+    its own candidate; see :mod:`app.services.ensemble` for the merge policy.
+    """
+    sources: list[ModelSource] = []
+    if image is not None and (image.filename or image.content_type):
+        sources.append(await _run_alphabet_source(image))
+    else:
+        sources.append(not_run("alphabet"))
+
+    if landmarks is not None and landmarks.strip():
+        sources.append(await _run_fingerspelling_source(landmarks))
+    else:
+        sources.append(not_run("fingerspelling"))
+
+    if video is not None and (video.filename or video.content_type):
+        sources.append(await _run_word_source(video))
+    else:
+        sources.append(not_run("word"))
+
+    attempted = [source for source in sources if source.ran]
+    if not attempted:
+        raise HTTPException(
+            400, "Provide at least one input: an image ('image'), landmarks ('landmarks'), or a clip ('video')."
+        )
+    try:
+        combined = combine(
+            sources,
+            _confidence_threshold("CONFIDENCE_THRESHOLD", "0.70"),
+            _confidence_threshold("WORD_CONFIDENCE_THRESHOLD", "0.30"),
+        )
+    except EnsembleError:
+        details = "; ".join(dict.fromkeys(source.detail for source in attempted if not source.ok))
+        status = 400 if all(source.client_error for source in attempted) else 503
+        raise HTTPException(status, f"Combined recognition failed: {details}")
+    return CombinedPredictionResponse(
+        label=combined.label,
+        confidence=combined.confidence,
+        accepted=combined.accepted,
+        agreement=combined.agreement,
+        method=combined.method,
+        word=(
+            PredictionItem(label=combined.word.label, confidence=combined.word.confidence)
+            if combined.word
+            else None
+        ),
+        sources=[
+            CombinedSourceItem(
+                model=source.model,
+                ran=source.ran,
+                ok=source.ok,
+                label=source.label,
+                confidence=source.confidence,
+                detail=source.detail,
+            )
+            for source in combined.sources
+        ],
+        top_predictions=list(combined.top_predictions),
+    )
+
+
 @app.get("/api/info")
 def info() -> dict[str, object]:
     return {
-        "recognition": "ISL fingerspelling (photo or hand landmarks) and CISLR word video recognition",
+        "recognition": "ISL fingerspelling (photo or hand landmarks), CISLR word video recognition, and a combined soft-voting ensemble of all three models",
         "labels": alphabet_predictor.labels,
         "input_guidance": "Keep one hand centered in the guide with a plain, well-lit background.",
         "features": {
+            "combined_recognition": "POST /api/predict/combined with any mix of image, landmarks, and video",
             "continuous_recognition": "POST /api/continuous/session then stream landmark frames",
             "translation_languages": list(translator.LANGUAGES.keys()),
             "emergency_phrases": "GET /api/emergency/phrases (prototype; not real dispatch)",
@@ -249,6 +442,7 @@ app.include_router(language_routes.build_router(translator))
 app.dependency_overrides[continuous_routes.get_predictor] = lambda: fingerspelling_predictor
 app.include_router(continuous_routes.router)
 app.include_router(emergency_routes.build_router(translator))
+app.dependency_overrides[emergency_routes.get_notifier] = lambda: twilio_notifier
 
 # Mount assets after API routes so /api is never swallowed by the static app.
 app.mount("/assets", StaticFiles(directory=FRONTEND / "assets"), name="assets")

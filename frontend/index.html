@@ -26,7 +26,8 @@
         <div><strong>Emergency phrases</strong></div>
         <button id="emergencyClose" class="icon-button" type="button" aria-label="Close">✕</button>
       </div>
-      <p class="emergency-note">Prototype only: this does <strong>not</strong> call real emergency services, police, or an ambulance. It shows and speaks a phrase loudly so a bystander can help.</p>
+      <p class="emergency-note" id="emergencyNote">Prototype only: this does <strong>not</strong> call real emergency services, police, or an ambulance. It shows and speaks a phrase loudly so a bystander can help.</p>
+      <p class="emergency-status" id="emergencyStatus" hidden></p>
       <div id="emergencyPhrases" class="emergency-phrases"></div>
     </div>
   </div>
@@ -34,13 +35,18 @@
 
   <main>
     <section class="hero">
-      <p class="eyebrow">Indian Sign Language · Four recognition modes</p>
+      <p class="eyebrow">Indian Sign Language · Five recognition modes</p>
       <h1>Let your hands<br><em>do the talking.</em></h1>
-      <p class="hero-copy">Pick a mode, show a sign to your camera, and SignBridge builds your message — letter by letter from a photo, your hand skeleton, or a live continuous stream, or whole words from a short video. Then translate it and speak it aloud.</p>
+      <p class="hero-copy">Pick a mode, show a sign to your camera, and SignBridge builds your message — letter by letter from a photo, your hand skeleton, or a live continuous stream, whole words from a short video, or all three models combined into one merged prediction. Then translate it and speak it aloud.</p>
     </section>
 
     <section class="model-picker" role="tablist" aria-label="Choose a recognition model">
-      <button class="model-option active" id="modeAlphabet" type="button" role="tab" aria-selected="true" data-mode="alphabet">
+      <button class="model-option active" id="modeCombined" type="button" role="tab" aria-selected="true" data-mode="combined">
+        <i class="model-dot" data-model-dot="combined" title="Checking…"></i>
+        <strong>Combined</strong>
+        <span>All three models · merged prediction</span>
+      </button>
+      <button class="model-option" id="modeAlphabet" type="button" role="tab" aria-selected="false" data-mode="alphabet">
         <i class="model-dot" data-model-dot="alphabet" title="Checking…"></i>
         <strong>Alphabet</strong>
         <span>Photo model · one frame</span>
@@ -109,6 +115,7 @@
             <strong id="confidence">0%</strong>
             <div class="meter"><i id="confidenceMeter"></i></div>
           </div>
+          <div id="modelChips" class="model-chips" hidden></div>
           <button id="addButton" class="button add" type="button">Add letter</button>
         </div>
         <div id="alternatives" class="alternatives" hidden></div>
@@ -157,7 +164,7 @@
       <h2>For a clearer result</h2>
       <div class="tip-grid">
         <article><b>01</b><h3>Use even light</h3><p>Face a window or light source. Avoid strong shadows behind your hand.</p></article>
-        <article><b>02</b><h3>Match the model</h3><p>The photo and landmark models read single letters. The word model reads one flowing sign over three seconds.</p></article>
+        <article><b>02</b><h3>Match the model</h3><p>The photo and landmark models read single letters. The word model reads one flowing sign over three seconds. Combined mode runs every model on one capture and merges their votes.</p></article>
         <article><b>03</b><h3>Hold steady</h3><p>Pause briefly before recognition so the image stays sharp and the tracked landmarks settle.</p></article>
       </div>
     </section>

@@ -28,3 +28,40 @@ The alphabet and fingerspelling models work with the base requirements. The word
 3. **The CISLR artifacts** (`backend/models/cislr/`): classifier, labels, and normalization stats. They are committed to the repository and included in Docker builds made with `--build-arg WITH_WORD_MODEL=true`.
 
 `GET /api/health` reports exactly which piece is missing. In Docker, `docker build --build-arg WITH_WORD_MODEL=true .` handles all three pieces automatically (the Dockerfile downloads the checkpoint at build time).
+
+## Enabling real emergency SMS + voice calls (Twilio)
+
+Emergency alerts work out of the box as an on-screen/spoken prototype. To deliver
+them **for real** to your phone as an SMS and a voice call, set four environment
+variables before starting the server:
+
+```bash
+export TWILIO_ACCOUNT_SID=ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   # from the Twilio Console
+export TWILIO_AUTH_TOKEN=your_auth_token
+export TWILIO_FROM_NUMBER=+15550001111                          # your Twilio number (E.164)
+export EMERGENCY_TO_NUMBER=+919876543210                        # the number that receives alerts (E.164)
+```
+
+Then every `POST /api/emergency/alert` sends an SMS and places a voice call that
+speaks the phrase (Hindi voices are used when the phrase was raised in Hindi).
+Two optional toggles exist:
+
+- `EMERGENCY_SMS_ENABLED=false` — disable the SMS channel.
+- `EMERGENCY_VOICE_CALL_ENABLED=false` — disable the voice-call channel.
+
+If you use a Messaging Service instead of a single sender number, set
+`TWILIO_MESSAGING_SERVICE_SID` (SMS only; the voice call still needs
+`TWILIO_FROM_NUMBER`).
+
+Verification: `GET /api/emergency/status` reports the provider configuration and
+a masked destination number. Alerts notify your configured contact only — this
+is not a public emergency-services (112 / 911) integration.
+
+## Combined (all three models) mode
+
+`POST /api/predict/combined` accepts any mix of `image`, `landmarks`, and
+`video` in one request and merges the results. The Combined tab in the UI
+records one clip, grabs a mid-sign frame plus its landmarks, and sends all
+three together; when the word model is unavailable it degrades to the two
+letter models automatically, and when no hand is detected it still uses the
+photo model.

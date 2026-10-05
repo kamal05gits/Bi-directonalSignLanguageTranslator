@@ -14,7 +14,7 @@ const VOICE_LANGUAGE_TAGS = {ta: 'ta-IN', hi: 'hi-IN'};
 
 let stream = null;
 let facingMode = 'user';
-let mode = 'alphabet';
+let mode = 'combined';
 let modelHealth = {};
 let currentLabel = '';
 let toastTimer;
@@ -33,7 +33,18 @@ let continuousTimer = null;
 let continuousNoHandStreak = 0;
 let continuousBusy = false;
 
+const MODEL_LABELS = {alphabet: 'Photo', fingerspelling: 'Landmarks', word: 'Video'};
+
 const MODES = {
+  combined: {
+    stageTitle: 'Sign a letter or word',
+    guideLabel: 'Fit your hand (and upper body for words)',
+    captureLabel: `Record ${WORD_SECONDS}s & combine`,
+    hint: 'Records one clip, then runs the photo, landmark, and video models together and merges their votes into a single prediction.',
+    addLabel: 'Add to message',
+    addsWord: false,
+    privacy: 'One frame, its hand landmarks, and the clip are processed together and never stored.',
+  },
   alphabet: {
     stageTitle: 'Show a sign',
     guideLabel: 'Place one hand here',
@@ -89,12 +100,24 @@ async function checkApi() {
     modelHealth = data.models || {};
     // Continuous mode reuses the fingerspelling model under the hood.
     modelHealth.continuous = modelHealth.fingerspelling;
+    // Combined mode runs every model that is available on one capture.
+    const availableModels = ['alphabet', 'fingerspelling', 'word'].filter(name => modelHealth[name] && modelHealth[name].available);
+    modelHealth.combined = {
+      available: availableModels.length > 0,
+      detail: availableModels.length === 3
+        ? 'Runs all three models and merges their votes'
+        : `Runs ${availableModels.join(' + ') || 'no models'} — deploy the missing models for a full ensemble`,
+    };
+    MODES.combined.captureLabel = modelHealth.word && modelHealth.word.available
+      ? `Record ${WORD_SECONDS}s & combine`
+      : 'Capture & combine models';
     for (const [name, dot] of Object.entries(modelDots)) {
       const health = modelHealth[name];
       const ok = Boolean(health && health.available);
       dot.className = `model-dot ${ok ? 'ok' : 'down'}`;
       dot.title = health ? health.detail : 'Unknown';
     }
+    if (mode === 'combined' && !recording) els.captureButton.textContent = MODES.combined.captureLabel;
     if (modelHealth.word && !modelHealth.word.available && mode === 'word') toast(modelHealth.word.detail, true);
   } catch {
     els.apiStatus.className = 'status offline';
@@ -120,6 +143,7 @@ function setMode(nextMode) {
   els.addButton.textContent = config.addLabel;
   els.addButton.hidden = mode === 'continuous';
   els.message.readOnly = mode === 'continuous';
+  els.modelChips.hidden = true;
   clearLandmarkOverlay();
   if (modelHealth[mode] && !modelHealth[mode].available) toast(modelHealth[mode].detail, true);
 }
@@ -331,6 +355,7 @@ async function ensureContinuousSession() {
 }
 
 function renderContinuousState(data) {
+  els.modelChips.hidden = true;
   els.message.value = data.text || '';
   updateMessage();
   if (data.label) {
@@ -426,16 +451,18 @@ function pickVideoMimeType() {
   return candidates.find(candidate => MediaRecorder.isTypeSupported(candidate)) || '';
 }
 
-async function recordWord() {
-  if (!stream || recording) return;
+// Records a clip of the live stream and resolves with the recorded blob.
+// `onTick(remaining)` runs once per countdown second so callers can grab
+// frames from mid-sign (used by combined mode to feed the letter models).
+async function recordClip(seconds = WORD_SECONDS, onTick = null) {
   const mimeType = pickVideoMimeType();
-  if (mimeType === null) return toast('Video recording is not supported in this browser.', true);
+  if (mimeType === null) throw new Error('Video recording is not supported in this browser.');
   const extension = mimeType.includes('mp4') ? 'mp4' : 'webm';
   let recorder;
   try {
     recorder = new MediaRecorder(stream, mimeType ? {mimeType, videoBitsPerSecond: 2500000} : undefined);
   } catch {
-    return toast('Could not start video recording in this browser.', true);
+    throw new Error('Could not start video recording in this browser.');
   }
   const chunks = [];
   recorder.ondataavailable = event => { if (event.data.size) chunks.push(event.data); };
@@ -444,10 +471,11 @@ async function recordWord() {
   els.captureButton.disabled = true;
   els.flipButton.disabled = true;
   recorder.start(250);
-  for (let remaining = WORD_SECONDS; remaining > 0 && recording; remaining--) {
+  for (let remaining = seconds; remaining > 0 && recording; remaining--) {
     els.countdown.textContent = remaining;
     els.countdown.hidden = false;
     els.captureButton.textContent = `Recording… ${remaining}s`;
+    if (onTick) await onTick(remaining);
     await new Promise(resolve => setTimeout(resolve, 1000));
   }
   els.countdown.hidden = true;
@@ -456,15 +484,18 @@ async function recordWord() {
   recording = false;
   els.flipButton.disabled = false;
   const blob = new Blob(chunks, {type: recorder.mimeType || mimeType || 'video/webm'});
-  if (!blob.size) {
-    els.captureButton.disabled = false;
-    els.captureButton.textContent = MODES.word.captureLabel;
-    return toast('Recording came back empty. Please try again.', true);
-  }
-  els.captureButton.textContent = 'Recognizing…';
-  const form = new FormData();
-  form.append('file', blob, `sign.${extension}`);
+  if (!blob.size) throw new Error('Recording came back empty. Please try again.');
+  return {blob, extension};
+}
+
+async function recordWord() {
+  if (!stream || recording) return;
+  els.captureButton.disabled = true;
   try {
+    const {blob, extension} = await recordClip(WORD_SECONDS);
+    els.captureButton.textContent = 'Recognizing…';
+    const form = new FormData();
+    form.append('file', blob, `sign.${extension}`);
     const data = await postForm('/api/predict/word', form);
     showPrediction(data);
   } catch (error) {
@@ -472,6 +503,94 @@ async function recordWord() {
   } finally {
     els.captureButton.disabled = !stream;
     els.captureButton.textContent = MODES.word.captureLabel;
+  }
+}
+
+// --- Combined mode (all three models, one merged prediction) ---------------
+
+// Grabs one mirrored JPEG for the photo model plus the raw-orientation hand
+// landmarks for the fingerspelling model from the same moment.
+async function grabFrameAndLandmarks() {
+  const hands = await ensureHandTracker();
+  drawFrame(false); // raw camera orientation, matching the landmark training data
+  const results = await detectHands(els.canvas, hands);
+  drawLandmarkOverlay(results);
+  const hasHand = results.multiHandLandmarks && results.multiHandLandmarks.length;
+  const landmarks = hasHand ? landmarksToVector(results) : null;
+  drawFrame(true); // mirrored, matching what the user sees (photo model input)
+  const imageBlob = await new Promise(resolve => els.canvas.toBlob(resolve, 'image/jpeg', .9));
+  return {imageBlob, landmarks};
+}
+
+async function captureCombined() {
+  if (!stream || !els.video.videoWidth || recording) return;
+  const wordAvailable = modelHealth.word && modelHealth.word.available;
+  els.captureButton.disabled = true;
+  try {
+    let clip = null;
+    let frame = null;
+    if (wordAvailable) {
+      // Load MediaPipe before the countdown so the mid-sign grab never stalls it.
+      els.captureButton.textContent = handsInstance ? 'Preparing…' : 'Loading hand tracker…';
+      await ensureHandTracker();
+      clip = await recordClip(WORD_SECONDS, async remaining => {
+        // Grab the frame and landmarks mid-sign (second of three).
+        if (remaining === WORD_SECONDS - 1) frame = await grabFrameAndLandmarks();
+      });
+      if (!frame) frame = await grabFrameAndLandmarks(); // recording was cut short
+    } else {
+      els.captureButton.textContent = handsInstance ? 'Recognizing…' : 'Loading hand tracker…';
+      frame = await grabFrameAndLandmarks();
+    }
+    els.captureButton.textContent = 'Combining models…';
+    if (!frame.landmarks) toast('No hand detected — using the photo model only.', true);
+    const form = new FormData();
+    form.append('image', frame.imageBlob, 'capture.jpg');
+    if (frame.landmarks) form.append('landmarks', JSON.stringify(frame.landmarks));
+    if (clip) form.append('video', clip.blob, `sign.${clip.extension}`);
+    const data = await postForm('/api/predict/combined', form);
+    showCombinedPrediction(data);
+  } catch (error) {
+    toast(error.message, true);
+  } finally {
+    els.captureButton.disabled = !stream;
+    els.captureButton.textContent = MODES.combined.captureLabel;
+  }
+}
+
+function showCombinedPrediction(data) {
+  showPrediction({...data, top_predictions: data.top_predictions || []});
+  els.predictionState.title = data.method || '';
+  els.predictionState.textContent = data.accepted
+    ? (data.agreement === true ? 'Sign recognized — models agree' : 'Sign recognized')
+    : 'Low confidence — try again';
+  // Per-model breakdown chips.
+  const chips = (data.sources || []).filter(source => source.ran).map(source => {
+    if (source.ok) {
+      return `<span class="chip ok">${MODEL_LABELS[source.model] || source.model}: <b>${source.label}</b> ${Math.round((source.confidence || 0) * 100)}%</span>`;
+    }
+    return `<span class="chip down" title="${source.detail}">${MODEL_LABELS[source.model] || source.model}: failed</span>`;
+  });
+  if (data.agreement === false) chips.push('<span class="chip warn">letter models disagreed</span>');
+  els.modelChips.innerHTML = chips.join('');
+  els.modelChips.hidden = !chips.length;
+  // Offer the word model's candidate when the consensus landed on a letter.
+  if (data.word && data.word.label !== data.label) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'word-candidate';
+    button.textContent = `Word: ${data.word.label} ${Math.round(data.word.confidence * 100)}%`;
+    button.onclick = () => {
+      currentLabel = data.word.label;
+      els.letter.textContent = currentLabel;
+      els.letter.classList.add('word');
+      els.addButton.disabled = false;
+      els.addButton.textContent = 'Add word';
+    };
+    els.alternatives.hidden = false;
+    if (!els.alternatives.textContent.trim()) els.alternatives.textContent = 'Maybe ';
+    els.alternatives.appendChild(document.createTextNode(' '));
+    els.alternatives.appendChild(button);
   }
 }
 
@@ -497,8 +616,9 @@ function showPrediction(data) {
   currentLabel = data.label;
   els.predictionEmpty.hidden = true;
   els.predictionResult.hidden = false;
+  els.modelChips.hidden = true;
   els.letter.textContent = data.label;
-  els.letter.classList.toggle('word', config.addsWord);
+  els.letter.classList.toggle('word', config.addsWord || String(data.label).length > 1);
   const percent = Math.round(data.confidence * 100);
   els.confidence.textContent = `${percent}% confidence`;
   els.confidenceMeter.style.width = `${percent}%`;
@@ -517,7 +637,10 @@ function showPrediction(data) {
 
 function addToMessage() {
   if (!currentLabel) return;
-  const addition = MODES[mode].addsWord ? `${currentLabel} ` : currentLabel;
+  // In combined mode a prediction can be a letter or a whole word; words get
+  // the same trailing space the word model's results use.
+  const asWord = MODES[mode].addsWord || String(currentLabel).trim().length > 1;
+  const addition = asWord ? `${currentLabel} ` : currentLabel;
   if (els.message.value.length + addition.length > 240) return toast('The message is full.', true);
   els.message.value += addition;
   updateMessage();
@@ -603,7 +726,25 @@ function speakText(text, lang) {
   speechSynthesis.speak(utterance);
 }
 
-// --- Emergency phrases (prototype; not a real dispatch integration) ------
+// --- Emergency phrases (on-screen/spoken now; Twilio SMS + call when configured) ---
+
+function renderEmergencyStatus(notification) {
+  if (!notification) return;
+  if (notification.configured) {
+    const channels = [notification.sms_enabled && 'SMS', notification.call_enabled && 'voice call'].filter(Boolean);
+    els.emergencyNote.innerHTML = `Alerts are delivered <strong>for real</strong> by Twilio to <strong>${notification.to_masked || 'your number'}</strong> (${channels.join(' + ') || 'no channels'}). Your current message is included in the SMS. This notifies your contact — it does <strong>not</strong> call public emergency services (112 / 911).`;
+    els.emergencyStatus.hidden = false;
+    els.emergencyStatus.className = 'emergency-status ok';
+    els.emergencyStatus.textContent = notification.sdk_available === false
+      ? 'Twilio is configured, but the server is missing the twilio package — nothing can be sent yet.'
+      : `Twilio ${channels.join(' + ')} enabled → ${notification.to_masked}`;
+  } else {
+    els.emergencyNote.innerHTML = `Prototype only: this does <strong>not</strong> call real emergency services, police, or an ambulance, and sends no SMS. It shows and speaks a phrase loudly so a bystander can help. Configure Twilio (TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM_NUMBER, EMERGENCY_TO_NUMBER) to enable real SMS + call delivery.`;
+    els.emergencyStatus.hidden = false;
+    els.emergencyStatus.className = 'emergency-status warn';
+    els.emergencyStatus.textContent = 'Demo mode — no SMS or call will be sent.';
+  }
+}
 
 async function openEmergencyPanel() {
   els.emergencyPanel.hidden = false;
@@ -611,6 +752,7 @@ async function openEmergencyPanel() {
   try {
     const response = await fetch(`/api/emergency/phrases?language=${encodeURIComponent(language)}`);
     const data = await response.json();
+    renderEmergencyStatus(data.notification);
     els.emergencyPhrases.innerHTML = '';
     data.phrases.forEach(phrase => {
       const row = document.createElement('div');
@@ -632,6 +774,16 @@ function closeEmergencyPanel() {
   els.emergencyPanel.hidden = true;
 }
 
+function toastDelivery(notification) {
+  if (!notification || !notification.configured) return;
+  const sent = (notification.channels || []).filter(channel => channel.sent).map(channel => channel.channel.toUpperCase());
+  if (sent.length) {
+    toast(`Twilio alert sent (${sent.join(' + ')}) to ${notification.to_masked}`);
+  } else if ((notification.channels || []).length) {
+    toast('Twilio delivery failed — the phrase was shown and spoken only.', true);
+  }
+}
+
 async function triggerEmergencyPhrase(phrase, language) {
   els.emergencyBanner.textContent = phrase.translated;
   els.emergencyBanner.hidden = false;
@@ -644,10 +796,15 @@ async function triggerEmergencyPhrase(phrase, language) {
   }
   setTimeout(() => { els.emergencyBanner.hidden = true; }, 6000);
   try {
-    await fetch('/api/emergency/alert', {
+    const response = await fetch('/api/emergency/alert', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({phrase_id: phrase.id, language}),
+      body: JSON.stringify({
+        phrase_id: phrase.id,
+        language,
+        context_message: els.message.value.trim().slice(0, 240) || undefined,
+      }),
     });
+    if (response.ok) toastDelivery((await response.json()).notification);
   } catch {
     // Logging the alert is best-effort only; the on-screen/spoken phrase already happened.
   }
@@ -657,6 +814,7 @@ modeButtons.forEach(button => button.onclick = () => setMode(button.dataset.mode
 els.cameraButton.onclick = () => stream ? stopCamera() : startCamera();
 els.pauseButton.onclick = togglePause;
 els.captureButton.onclick = () => {
+  if (mode === 'combined') return captureCombined();
   if (mode === 'alphabet') return captureAlphabet();
   if (mode === 'fingerspelling') return captureFingerspelling();
   if (mode === 'continuous') return toggleContinuous();
@@ -690,7 +848,7 @@ els.emergencyButton.onclick = openEmergencyPanel;
 els.emergencyClose.onclick = closeEmergencyPanel;
 els.emergencyPanel.addEventListener('click', event => { if (event.target === els.emergencyPanel) closeEmergencyPanel(); });
 window.addEventListener('beforeunload', stopCamera);
-setMode('alphabet');
+setMode('combined');
 checkApi();
 updateMessage();
 loadLanguages();
