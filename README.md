@@ -1,6 +1,6 @@
 # SignBridge — Bidirectional ISL Translator
 
-SignBridge is a camera-based Indian Sign Language (ISL) translation prototype with **three bundled recognition models**. It recognizes alphabet signs from webcam photos, reads finger positions from your hand skeleton, classifies short signed-word video clips, lets you assemble a message, reads it aloud, and turns typed text into an easy-to-follow fingerspelling sequence.
+SignBridge is a camera-based Indian Sign Language (ISL) translation prototype with **three bundled recognition models and a continuous live-recognition pipeline**. It recognizes alphabet signs from webcam photos, reads finger positions from your hand skeleton (one shot or streamed continuously into a sentence), classifies short signed-word video clips, lets you assemble and edit a message, translates it into Tamil/Hindi, reads it aloud (including in the translated language), surfaces one-tap emergency phrases, and turns typed text into an easy-to-follow fingerspelling sequence.
 
 ## What works
 
@@ -8,10 +8,14 @@ SignBridge is a camera-based Indian Sign Language (ISL) translation prototype wi
   - **Alphabet photo model** — 26-class CNN on a single 64×64 camera frame
   - **Fingerspelling landmark model** — 26-class MLP on a 126-value hand-skeleton vector extracted in the browser with MediaPipe (background independent)
   - **CISLR word model** — 82-class word classifier over I3D video features from a ~3-second clip (requires the Git LFS checkpoint and optional PyTorch/OpenCV dependencies)
-- Browser webcam capture with front/rear camera switching and 3-second clip recording
+- **Continuous recognition mode** (`/api/continuous/*`) — streams landmark frames from the browser into a server-side session that smooths noisy per-frame predictions (`app.ml.predict.LabelStabilizer`), averages a rolling landmark buffer (`app.features.sequence_buffer.SequenceBuffer`), and assembles accepted letters into editable text with the sentence/NLP layer (`app.language.sentence_processor.SentenceProcessor`) — including automatic space insertion on a hand-away pause and manual backspace/punctuation.
+- **Multilingual translation** (`/api/translate`, `/api/languages`) — a bundled, fully-offline dictionary/phrase translator (English → Tamil/Hindi today) that reports unresolved words explicitly instead of guessing.
+- **Emergency phrases** (`/api/emergency/*`) — one-tap, pre-translated high-value phrases (help, ambulance, police, doctor, deaf, fire, lost, hospital) shown large on screen and spoken aloud immediately. This is explicitly a **prototype**: it is not wired to any real dispatch, SMS, or telephony provider — every response says so.
+- Browser webcam capture with front/rear camera switching, pause/resume, and 3-second clip recording
+- Live hand-landmark overlay drawn over the video feed (MediaPipe drawing utils)
 - Confidence thresholds and ranked alternative predictions for every model
 - Model picker UI with per-model availability indicators fed by `/api/health`
-- Message editing, browser text-to-speech, and text-to-letter sequencing
+- Message editing, browser text-to-speech with replay/stop/mute and per-language voice selection, and text-to-letter sequencing
 - Responsive, accessible frontend served by the same FastAPI service
 - Docker and Render Blueprint deployment
 - Health endpoint and lazy model loading for reliable deploys
@@ -140,6 +144,37 @@ Send multipart form data with a video field named `file`: a ~3-second WebM, MP4,
 curl -F "file=@sign.webm" http://localhost:10000/api/predict/word
 ```
 
+### Continuous recognition: `POST /api/continuous/session` + `.../frame`
+
+Create a session, then stream one 126-value landmark vector per frame (an all-zero vector means "no hand visible"). The server averages a short rolling buffer, requires a label to hold for several consecutive frames before accepting it, and suppresses immediate repeats — only then does it append the letter to the session's sentence.
+
+```bash
+SID=$(curl -s -X POST http://localhost:10000/api/continuous/session | python3 -c "import json,sys;print(json.load(sys.stdin)['session_id'])")
+curl -H "Content-Type: application/json" -d '{"landmarks": [ ...126 values... ]}' \
+  http://localhost:10000/api/continuous/session/$SID/frame
+```
+
+Other endpoints on the same session: `GET .../session/{id}` (current text/tokens), `POST .../space`, `POST .../punctuation` (`{"mark": "."}`), `POST .../backspace`, `POST .../clear`, `DELETE .../session/{id}`.
+
+### `GET /api/languages` and `POST /api/translate`
+
+Lists supported target languages and translates English text/phrases with a bundled offline dictionary (no third-party translation API or network call). Unresolved words are reported explicitly rather than guessed.
+
+```bash
+curl -H "Content-Type: application/json" -d '{"text": "thank you", "language": "ta"}' \
+  http://localhost:10000/api/translate
+```
+
+### `GET /api/emergency/phrases` and `POST /api/emergency/alert`
+
+A **prototype** emergency-phrase feature: lists pre-translated high-value phrases and records (in memory only) that an alert was raised. It does not place a real call, SMS, or dispatch request — every response states this plainly, and `POST /api/emergency/alert` is the single extension point for wiring a real provider later.
+
+```bash
+curl http://localhost:10000/api/emergency/phrases?language=hi
+curl -H "Content-Type: application/json" -d '{"phrase_id": "ambulance", "language": "ta"}' \
+  http://localhost:10000/api/emergency/alert
+```
+
 ## Configuration
 
 | Environment variable | Default | Purpose |
@@ -168,4 +203,4 @@ curl -F "file=@sign.webm" http://localhost:10000/api/predict/word
 python -m pytest -q
 ```
 
-The suite covers dataset importers, feature extraction, prediction engines, the three model services, and the HTTP API. Tests that need FastAPI, TensorFlow, PyTorch, or OpenCV skip automatically when those packages are not installed.
+The suite covers dataset importers, feature extraction, prediction engines (including the live-stream confidence stabilizer), the three model services, the sentence/translation/emergency modules, and the full HTTP API (continuous session, translation, emergency). Tests that need FastAPI, TensorFlow, PyTorch, or OpenCV skip automatically when those packages are not installed.

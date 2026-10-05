@@ -15,3 +15,28 @@
 .letter.word{font-size:clamp(17px,2.2vw,26px);padding:6px;text-align:center;text-transform:lowercase;overflow-wrap:anywhere}
 .alternatives button{text-transform:none}
 @media(max-width:800px){.model-picker{grid-template-columns:1fr}.model-option{flex-direction:row;align-items:center;gap:9px;padding:12px 14px 12px 36px}.model-option span{font-size:10px}}
+/* --- Continuous mode, translation, TTS controls, emergency UI --- */
+.topbar-right{display:flex;align-items:center;gap:14px}
+.emergency-button{border:1px solid #f3b7ab;background:#fff1ee;color:var(--danger);font:700 12px 'DM Sans';border-radius:10px;padding:8px 12px;cursor:pointer}
+.emergency-button:hover{background:var(--danger);color:#fff}
+.heading-actions{display:flex;gap:8px}
+.landmark-overlay{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
+.paused-overlay{position:absolute;inset:0;display:grid;place-items:center;background:rgba(10,15,12,.55);color:#fff;font:800 22px Manrope;letter-spacing:.08em;text-transform:uppercase}
+.speech-bar{display:flex;align-items:center;gap:8px;margin-top:10px;flex-wrap:wrap}
+.mute-toggle{display:flex;align-items:center;gap:5px;font-size:11px;color:var(--muted);margin-left:auto}
+.translate-card{margin-top:20px;padding:24px;background:var(--card);border:1px solid var(--line);border-radius:24px;box-shadow:var(--shadow)}
+.translate-controls{display:flex;gap:10px;margin:14px 0;flex-wrap:wrap}
+.translate-controls select{flex:1;min-width:180px;border:1px solid var(--line);border-radius:10px;padding:10px;font:600 13px 'DM Sans'}
+.translation-output{background:#fafbf9;border:1px dashed var(--line);border-radius:13px;padding:14px;font-size:15px;min-height:24px;white-space:pre-wrap}
+.continuous-caption{display:flex;align-items:center;gap:10px;margin-top:10px;padding:10px 12px;background:#eef1ea;border-radius:12px;font-size:13px;color:var(--ink)}
+.continuous-caption strong{font:800 18px Manrope;text-transform:uppercase}
+.emergency-panel{position:fixed;inset:0;background:rgba(10,15,12,.55);display:flex;align-items:center;justify-content:center;z-index:100;padding:20px}
+.emergency-panel-card{background:#fff;border-radius:20px;padding:22px;max-width:480px;width:100%;max-height:85vh;overflow:auto;box-shadow:var(--shadow)}
+.emergency-note{font-size:12px;color:var(--muted);background:#fff1ee;border:1px solid #f3b7ab;border-radius:10px;padding:10px}
+.emergency-phrases{display:grid;gap:8px;margin-top:14px}
+.emergency-phrase{display:flex;justify-content:space-between;align-items:center;gap:10px;border:1px solid var(--line);border-radius:12px;padding:10px 12px}
+.emergency-phrase strong{font-size:13px}
+.emergency-phrase span{display:block;color:var(--muted);font-size:11px}
+.emergency-phrase button{border:0;background:var(--danger);color:#fff;border-radius:8px;padding:8px 12px;font:700 11px 'DM Sans';cursor:pointer}
+.emergency-banner{position:fixed;left:50%;top:18px;transform:translateX(-50%);background:var(--danger);color:#fff;padding:16px 26px;border-radius:14px;font:800 20px Manrope;z-index:110;box-shadow:var(--shadow);text-align:center;max-width:90vw}
+@media(max-width:800px){.translate-controls{flex-direction:column}.mute-toggle{margin-left:0}}
