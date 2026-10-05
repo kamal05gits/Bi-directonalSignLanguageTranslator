@@ -1,0 +1,2 @@
+*.pt filter=lfs diff=lfs merge=lfs -text
+backend/i3d/weights/asl2000/*.pt filter=lfs diff=lfs merge=lfs -text
