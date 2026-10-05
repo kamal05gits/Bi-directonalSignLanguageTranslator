@@ -1,11 +1,16 @@
 const $ = (id) => document.getElementById(id);
-const els = Object.fromEntries(['apiStatus','video','canvas','cameraEmpty','cameraButton','captureButton','flipButton','stageTitle','guideLabel','privacyNote','predictionEmpty','predictionResult','predictionHint','letter','confidence','confidenceMeter','predictionState','addButton','alternatives','message','characterCount','clearButton','spaceButton','backspaceButton','speakButton','fingerSequence','toast'].map(id => [id, $(id)]));
+const els = Object.fromEntries(['apiStatus','video','canvas','landmarkOverlay','cameraEmpty','cameraButton','pauseButton','captureButton','flipButton','stageTitle','guideLabel','privacyNote','predictionEmpty','predictionResult','predictionHint','letter','confidence','confidenceMeter','predictionState','addButton','alternatives','message','characterCount','clearButton','spaceButton','periodButton','backspaceButton','speakButton','replayButton','stopSpeechButton','muteToggle','fingerSequence','toast','countdown','pausedOverlay','languageSelect','translateButton','speakTranslatedButton','translationOutput','emergencyButton','emergencyPanel','emergencyClose','emergencyPhrases','emergencyBanner'].map(id => [id, $(id)]));
 const modeButtons = [...document.querySelectorAll('.model-option')];
 const modelDots = Object.fromEntries([...document.querySelectorAll('[data-model-dot]')].map(dot => [dot.dataset.modelDot, dot]));
 
 const WORD_SECONDS = 3;
 const HANDS_VERSION = '0.4.1675469240';
 const HANDS_CDN = `https://cdn.jsdelivr.net/npm/@mediapipe/hands@${HANDS_VERSION}`;
+const DRAWING_VERSION = '0.3.1675466124';
+const DRAWING_CDN = `https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils@${DRAWING_VERSION}`;
+const CONTINUOUS_INTERVAL_MS = 350;
+const NO_HAND_FRAMES_BEFORE_SPACE = 4;
+const VOICE_LANGUAGE_TAGS = {ta: 'ta-IN', hi: 'hi-IN'};
 
 let stream = null;
 let facingMode = 'user';
@@ -15,7 +20,18 @@ let currentLabel = '';
 let toastTimer;
 let handsPromise = null;
 let handsInstance = null;
+let drawingUtilsPromise = null;
 let recording = false;
+let paused = false;
+let lastUtteranceText = '';
+let translatedText = '';
+let translatedLanguage = '';
+
+// --- Continuous (live stream) recognition state ---
+let continuousSessionId = null;
+let continuousTimer = null;
+let continuousNoHandStreak = 0;
+let continuousBusy = false;
 
 const MODES = {
   alphabet: {
@@ -45,6 +61,15 @@ const MODES = {
     addsWord: true,
     privacy: 'Clips are processed for recognition and are not stored.',
   },
+  continuous: {
+    stageTitle: 'Sign continuously',
+    guideLabel: 'Keep your whole hand in view',
+    captureLabel: 'Start continuous recognition',
+    hint: 'Hold each letter steady; SignBridge builds the sentence automatically. Pause with no hand visible to insert a space.',
+    addLabel: 'Add letter',
+    addsWord: false,
+    privacy: 'Only landmark coordinates leave your browser, streamed continuously while active — never the video.',
+  },
 };
 
 function toast(message, error = false) {
@@ -62,6 +87,8 @@ async function checkApi() {
     els.apiStatus.className = data.model_available ? 'status online' : 'status offline';
     els.apiStatus.querySelector('span').textContent = data.model_available ? 'Service ready' : 'Model missing';
     modelHealth = data.models || {};
+    // Continuous mode reuses the fingerspelling model under the hood.
+    modelHealth.continuous = modelHealth.fingerspelling;
     for (const [name, dot] of Object.entries(modelDots)) {
       const health = modelHealth[name];
       const ok = Boolean(health && health.available);
@@ -77,6 +104,7 @@ async function checkApi() {
 
 function setMode(nextMode) {
   if (recording) return toast('Stop the recording before switching models.', true);
+  if (mode === 'continuous' && continuousTimer) stopContinuous();
   mode = nextMode;
   const config = MODES[mode];
   modeButtons.forEach(button => {
@@ -90,6 +118,9 @@ function setMode(nextMode) {
   els.predictionHint.textContent = config.hint;
   els.privacyNote.textContent = config.privacy;
   els.addButton.textContent = config.addLabel;
+  els.addButton.hidden = mode === 'continuous';
+  els.message.readOnly = mode === 'continuous';
+  clearLandmarkOverlay();
   if (modelHealth[mode] && !modelHealth[mode].available) toast(modelHealth[mode].detail, true);
 }
 
@@ -102,21 +133,42 @@ async function startCamera() {
     await els.video.play();
     els.cameraEmpty.hidden = true;
     els.captureButton.disabled = false;
+    els.pauseButton.disabled = false;
     els.cameraButton.textContent = 'Stop camera';
+    paused = false;
+    els.pausedOverlay.hidden = true;
   } catch (error) {
     toast(error.name === 'NotAllowedError' ? 'Camera permission was denied. Allow it in browser settings.' : 'Could not start your camera.', true);
   }
 }
 
 function stopCamera() {
+  if (continuousTimer) stopContinuous();
   if (stream) stream.getTracks().forEach(track => track.stop());
   stream = null;
   recording = false;
+  paused = false;
   els.video.srcObject = null;
   els.cameraEmpty.hidden = false;
   els.captureButton.disabled = true;
+  els.pauseButton.disabled = true;
+  els.pausedOverlay.hidden = true;
   els.cameraButton.textContent = 'Start camera';
   els.countdown.hidden = true;
+  clearLandmarkOverlay();
+}
+
+function togglePause() {
+  if (!stream) return;
+  paused = !paused;
+  stream.getVideoTracks().forEach(track => { track.enabled = !paused; });
+  els.pausedOverlay.hidden = !paused;
+  els.pauseButton.textContent = paused ? '▶' : '⏸';
+  els.pauseButton.title = paused ? 'Resume camera' : 'Pause camera';
+  if (paused && continuousTimer) clearInterval(continuousTimer), continuousTimer = null;
+  else if (!paused && mode === 'continuous' && continuousSessionId && !continuousTimer) {
+    continuousTimer = setInterval(stepContinuous, CONTINUOUS_INTERVAL_MS);
+  }
 }
 
 // Draws the current video frame to the hidden canvas. The selfie camera is
@@ -182,11 +234,48 @@ async function ensureHandTracker() {
   }
 }
 
+async function ensureDrawingUtils() {
+  if (window.drawConnectors && window.drawLandmarks) return;
+  drawingUtilsPromise = drawingUtilsPromise || loadScript(`${DRAWING_CDN}/drawing_utils.js`);
+  await drawingUtilsPromise;
+}
+
 function detectHands(source, hands) {
   return new Promise((resolve, reject) => {
     hands.onResults(resolve);
     hands.send({image: source}).catch(reject);
   });
+}
+
+// Visual feedback for the "Hand Detection & Landmark Extraction" module: draw
+// the tracked skeleton over the live video so the user can see what the
+// model sees, instead of the detector being an invisible black box.
+function clearLandmarkOverlay() {
+  if (!els.landmarkOverlay) return;
+  const context = els.landmarkOverlay.getContext('2d');
+  context.clearRect(0, 0, els.landmarkOverlay.width, els.landmarkOverlay.height);
+}
+
+async function drawLandmarkOverlay(results) {
+  if (!els.landmarkOverlay || !els.video.videoWidth) return;
+  els.landmarkOverlay.width = els.video.clientWidth;
+  els.landmarkOverlay.height = els.video.clientHeight;
+  const context = els.landmarkOverlay.getContext('2d');
+  context.clearRect(0, 0, els.landmarkOverlay.width, els.landmarkOverlay.height);
+  const hands = results.multiHandLandmarks || [];
+  if (!hands.length) return;
+  try {
+    await ensureDrawingUtils();
+  } catch {
+    return; // Overlay is cosmetic; recognition still works without it.
+  }
+  context.save();
+  if (facingMode === 'user') { context.translate(els.landmarkOverlay.width, 0); context.scale(-1, 1); }
+  hands.forEach(points => {
+    window.drawConnectors(context, points, window.HAND_CONNECTIONS, {color: '#c8f169', lineWidth: 3});
+    window.drawLandmarks(context, points, {color: '#111827', lineWidth: 1, radius: 3});
+  });
+  context.restore();
 }
 
 // Builds the 126-value vector the fingerspelling model was trained on:
@@ -218,6 +307,7 @@ async function captureFingerspelling() {
     els.captureButton.textContent = 'Recognizing…';
     drawFrame(false);
     const results = await detectHands(els.canvas, hands);
+    drawLandmarkOverlay(results);
     if (!results.multiHandLandmarks || !results.multiHandLandmarks.length) {
       return toast('No hand detected. Fill the guide with one well-lit hand.', true);
     }
@@ -228,6 +318,105 @@ async function captureFingerspelling() {
   } finally {
     els.captureButton.disabled = false;
     els.captureButton.textContent = MODES.fingerspelling.captureLabel;
+  }
+}
+
+// --- Continuous (live stream) recognition ---------------------------------
+
+async function ensureContinuousSession() {
+  if (continuousSessionId) return continuousSessionId;
+  const data = await postJson('/api/continuous/session', {});
+  continuousSessionId = data.session_id;
+  return continuousSessionId;
+}
+
+function renderContinuousState(data) {
+  els.message.value = data.text || '';
+  updateMessage();
+  if (data.label) {
+    els.predictionEmpty.hidden = true;
+    els.predictionResult.hidden = false;
+    els.letter.textContent = data.label;
+    const percent = Math.round((data.confidence || 0) * 100);
+    els.confidence.textContent = `${percent}% confidence`;
+    els.confidenceMeter.style.width = `${percent}%`;
+    els.predictionState.textContent = data.accepted ? 'Added to sentence' : (data.reason || 'Stabilizing…');
+  } else {
+    els.predictionState.textContent = data.reason || 'Show a hand to begin';
+  }
+}
+
+async function stepContinuous() {
+  if (!stream || paused || continuousBusy || !els.video.videoWidth) return;
+  continuousBusy = true;
+  try {
+    const hands = await ensureHandTracker();
+    drawFrame(false);
+    const results = await detectHands(els.canvas, hands);
+    drawLandmarkOverlay(results);
+    const hasHand = results.multiHandLandmarks && results.multiHandLandmarks.length;
+    const vector = hasHand ? landmarksToVector(results) : new Array(126).fill(0);
+    const data = await postJson(`/api/continuous/session/${continuousSessionId}/frame`, {landmarks: vector});
+    renderContinuousState(data);
+    if (data.reason === 'No hand detected') {
+      continuousNoHandStreak += 1;
+      if (continuousNoHandStreak === NO_HAND_FRAMES_BEFORE_SPACE) {
+        const spaced = await postJson(`/api/continuous/session/${continuousSessionId}/space`, {});
+        renderContinuousState(spaced);
+      }
+    } else {
+      continuousNoHandStreak = 0;
+    }
+  } catch (error) {
+    toast(error.message, true);
+  } finally {
+    continuousBusy = false;
+  }
+}
+
+async function startContinuous() {
+  if (!stream) return toast('Start the camera first.', true);
+  try {
+    els.captureButton.disabled = true;
+    els.captureButton.textContent = 'Starting…';
+    await ensureHandTracker();
+    await ensureContinuousSession();
+    continuousNoHandStreak = 0;
+    els.predictionEmpty.hidden = true;
+    els.predictionResult.hidden = false;
+    els.letter.textContent = '—';
+    els.predictionState.textContent = 'Show a hand to begin';
+    els.confidence.textContent = '0% confidence';
+    els.confidenceMeter.style.width = '0%';
+    continuousTimer = setInterval(stepContinuous, CONTINUOUS_INTERVAL_MS);
+    els.captureButton.textContent = 'Stop continuous recognition';
+  } catch (error) {
+    toast(error.message, true);
+  } finally {
+    els.captureButton.disabled = false;
+  }
+}
+
+function stopContinuous() {
+  if (continuousTimer) clearInterval(continuousTimer);
+  continuousTimer = null;
+  els.captureButton.textContent = MODES.continuous.captureLabel;
+}
+
+async function toggleContinuous() {
+  if (continuousTimer) stopContinuous();
+  else await startContinuous();
+}
+
+async function continuousAction(path) {
+  if (!continuousSessionId) return false;
+  try {
+    const data = await postJson(`/api/continuous/session/${continuousSessionId}${path}`, path.includes('punctuation') ? {mark: '.'} : {});
+    renderContinuousState(data);
+    return true;
+  } catch (error) {
+    toast(error.message, true);
+    return true;
   }
 }
 
@@ -351,26 +540,157 @@ function updateMessage() {
   });
 }
 
+// --- Translation (Multilingual Output module) -----------------------------
+
+async function loadLanguages() {
+  try {
+    const response = await fetch('/api/languages');
+    const data = await response.json();
+    (data.languages || []).forEach(language => {
+      const option = document.createElement('option');
+      option.value = language.code;
+      option.textContent = language.name;
+      els.languageSelect.appendChild(option);
+    });
+  } catch {
+    toast('Could not load the list of languages.', true);
+  }
+}
+
+async function translateMessage() {
+  const text = els.message.value.trim();
+  const language = els.languageSelect.value;
+  if (!text) return toast('Build or type a message first.', true);
+  if (!language) return toast('Choose a target language first.', true);
+  els.translateButton.disabled = true;
+  try {
+    const response = await fetch('/api/translate', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({text, language}),
+    });
+    const data = await response.json();
+    if (data.success) {
+      translatedText = data.translated;
+      translatedLanguage = language;
+      els.translationOutput.textContent = `${data.translated}`;
+      els.speakTranslatedButton.disabled = false;
+    } else {
+      translatedText = '';
+      els.speakTranslatedButton.disabled = true;
+      els.translationOutput.textContent = data.message || 'Could not translate that text.';
+    }
+  } catch {
+    toast('Translation request failed.', true);
+  } finally {
+    els.translateButton.disabled = false;
+  }
+}
+
+// --- Text-to-speech (Speak / Replay / Stop / Mute) ------------------------
+
+function speakText(text, lang) {
+  if (!text || !text.trim()) return toast('Nothing to speak yet.', true);
+  if (!('speechSynthesis' in window)) return toast('Speech is not supported in this browser.', true);
+  if (els.muteToggle.checked) return toast('Unmute to hear speech.', true);
+  speechSynthesis.cancel();
+  const utterance = new SpeechSynthesisUtterance(text);
+  if (lang) {
+    utterance.lang = lang;
+    const voice = speechSynthesis.getVoices().find(candidate => candidate.lang && candidate.lang.startsWith(lang.split('-')[0]));
+    if (voice) utterance.voice = voice;
+  }
+  lastUtteranceText = text;
+  speechSynthesis.speak(utterance);
+}
+
+// --- Emergency phrases (prototype; not a real dispatch integration) ------
+
+async function openEmergencyPanel() {
+  els.emergencyPanel.hidden = false;
+  const language = els.languageSelect.value || 'en';
+  try {
+    const response = await fetch(`/api/emergency/phrases?language=${encodeURIComponent(language)}`);
+    const data = await response.json();
+    els.emergencyPhrases.innerHTML = '';
+    data.phrases.forEach(phrase => {
+      const row = document.createElement('div');
+      row.className = 'emergency-phrase';
+      row.innerHTML = `<div><strong>${phrase.translated}</strong><span>${phrase.text}</span></div>`;
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.textContent = 'Show & speak';
+      button.onclick = () => triggerEmergencyPhrase(phrase, language);
+      row.appendChild(button);
+      els.emergencyPhrases.appendChild(row);
+    });
+  } catch {
+    els.emergencyPhrases.innerHTML = '<p>Could not load emergency phrases.</p>';
+  }
+}
+
+function closeEmergencyPanel() {
+  els.emergencyPanel.hidden = true;
+}
+
+async function triggerEmergencyPhrase(phrase, language) {
+  els.emergencyBanner.textContent = phrase.translated;
+  els.emergencyBanner.hidden = false;
+  if ('speechSynthesis' in window) {
+    speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(phrase.translated);
+    const lang = VOICE_LANGUAGE_TAGS[language];
+    if (lang) utterance.lang = lang;
+    speechSynthesis.speak(utterance); // Emergency speech always plays, even if muted.
+  }
+  setTimeout(() => { els.emergencyBanner.hidden = true; }, 6000);
+  try {
+    await fetch('/api/emergency/alert', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({phrase_id: phrase.id, language}),
+    });
+  } catch {
+    // Logging the alert is best-effort only; the on-screen/spoken phrase already happened.
+  }
+}
+
 modeButtons.forEach(button => button.onclick = () => setMode(button.dataset.mode));
 els.cameraButton.onclick = () => stream ? stopCamera() : startCamera();
+els.pauseButton.onclick = togglePause;
 els.captureButton.onclick = () => {
   if (mode === 'alphabet') return captureAlphabet();
   if (mode === 'fingerspelling') return captureFingerspelling();
+  if (mode === 'continuous') return toggleContinuous();
   return recordWord();
 };
 els.flipButton.onclick = async () => { if (recording) return; facingMode = facingMode === 'user' ? 'environment' : 'user'; if (stream) await startCamera(); };
 els.addButton.onclick = addToMessage;
-els.spaceButton.onclick = () => { if (els.message.value.length < 240) { els.message.value += ' '; updateMessage(); } };
-els.backspaceButton.onclick = () => { els.message.value = els.message.value.slice(0, -1); updateMessage(); };
-els.clearButton.onclick = () => { els.message.value = ''; updateMessage(); };
-els.message.oninput = updateMessage;
-els.speakButton.onclick = () => {
-  if (!els.message.value.trim()) return toast('Build or type a message first.', true);
-  if (!('speechSynthesis' in window)) return toast('Speech is not supported in this browser.', true);
-  speechSynthesis.cancel();
-  speechSynthesis.speak(new SpeechSynthesisUtterance(els.message.value));
+els.spaceButton.onclick = async () => {
+  if (mode === 'continuous' && await continuousAction('/space')) return;
+  if (els.message.value.length < 240) { els.message.value += ' '; updateMessage(); }
 };
+els.periodButton.onclick = async () => {
+  if (mode === 'continuous' && await continuousAction('/punctuation')) return;
+  if (els.message.value.length < 240) { els.message.value = els.message.value.replace(/\s+$/, '') + '.'; updateMessage(); }
+};
+els.backspaceButton.onclick = async () => {
+  if (mode === 'continuous' && await continuousAction('/backspace')) return;
+  els.message.value = els.message.value.slice(0, -1); updateMessage();
+};
+els.clearButton.onclick = async () => {
+  if (mode === 'continuous' && await continuousAction('/clear')) return;
+  els.message.value = ''; updateMessage();
+};
+els.message.oninput = updateMessage;
+els.speakButton.onclick = () => speakText(els.message.value, 'en-IN');
+els.replayButton.onclick = () => speakText(lastUtteranceText || els.message.value, 'en-IN');
+els.stopSpeechButton.onclick = () => { if ('speechSynthesis' in window) speechSynthesis.cancel(); };
+els.translateButton.onclick = translateMessage;
+els.speakTranslatedButton.onclick = () => speakText(translatedText, VOICE_LANGUAGE_TAGS[translatedLanguage]);
+els.emergencyButton.onclick = openEmergencyPanel;
+els.emergencyClose.onclick = closeEmergencyPanel;
+els.emergencyPanel.addEventListener('click', event => { if (event.target === els.emergencyPanel) closeEmergencyPanel(); });
 window.addEventListener('beforeunload', stopCamera);
 setMode('alphabet');
 checkApi();
 updateMessage();
+loadLanguages();

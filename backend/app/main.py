@@ -29,6 +29,10 @@ from starlette.concurrency import run_in_threadpool
 from PIL import Image, ImageOps
 from pydantic import BaseModel, ConfigDict, Field
 
+from .language.translator import DictionaryTranslator
+from .routes import continuous as continuous_routes
+from .routes import emergency as emergency_routes
+from .routes import language as language_routes
 from .services.alphabet_predictor import AlphabetPredictor
 from .services.fingerspelling_predictor import FEATURE_DIM, FingerspellingPredictor
 from .services.keras_classifier import Prediction
@@ -62,6 +66,7 @@ app = FastAPI(
 alphabet_predictor = AlphabetPredictor(MODEL, LABELS)
 fingerspelling_predictor = FingerspellingPredictor(FINGERSPELLING_MODEL, FINGERSPELLING_LABELS)
 word_predictor = WordPredictor(WORD_MODEL, WORD_LABELS, WORD_NORMALIZATION, I3D_WEIGHTS, I3D_CODE_DIR)
+translator = DictionaryTranslator()
 
 
 class ModelHealth(BaseModel):
@@ -215,6 +220,11 @@ def info() -> dict[str, object]:
         "recognition": "ISL fingerspelling (photo or hand landmarks) and CISLR word video recognition",
         "labels": alphabet_predictor.labels,
         "input_guidance": "Keep one hand centered in the guide with a plain, well-lit background.",
+        "features": {
+            "continuous_recognition": "POST /api/continuous/session then stream landmark frames",
+            "translation_languages": list(translator.LANGUAGES.keys()),
+            "emergency_phrases": "GET /api/emergency/phrases (prototype; not real dispatch)",
+        },
         "models": {
             "alphabet": {
                 "input": "single image",
@@ -234,6 +244,11 @@ def info() -> dict[str, object]:
         },
     }
 
+
+app.include_router(language_routes.build_router(translator))
+app.dependency_overrides[continuous_routes.get_predictor] = lambda: fingerspelling_predictor
+app.include_router(continuous_routes.router)
+app.include_router(emergency_routes.build_router(translator))
 
 # Mount assets after API routes so /api is never swallowed by the static app.
 app.mount("/assets", StaticFiles(directory=FRONTEND / "assets"), name="assets")
