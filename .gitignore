@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+.venv_i3d/
+.env
+
+# Node
+node_modules/
+dist/
+
+# Dataset
+CISLR/
+*.mp4
+*.avi
+
+# Large training files
+models/I3D_features.pkl
+training/features/
+training/checkpoints/
+training/runs/
+
+# Large I3D checkpoint
+backend/i3d/weights/
+
+# Temporary files
+git-files.txt
+*.log
+*.tmp
+
+# OS
+.DS_Store
+Thumbs.db
