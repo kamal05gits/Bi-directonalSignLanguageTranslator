@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="theme-color" content="#111827">
-  <meta name="description" content="Camera-based Indian Sign Language fingerspelling translator">
+  <meta name="description" content="Camera-based Indian Sign Language fingerspelling and word translator">
   <title>SignBridge — ISL Translator</title>
   <link rel="stylesheet" href="/assets/styles.css">
 </head>
@@ -19,21 +19,39 @@
 
   <main>
     <section class="hero">
-      <p class="eyebrow">Indian Sign Language · Fingerspelling</p>
+      <p class="eyebrow">Indian Sign Language · Three recognition models</p>
       <h1>Let your hands<br><em>do the talking.</em></h1>
-      <p class="hero-copy">Show one alphabet sign to your camera. SignBridge recognizes it and helps you build a message, one letter at a time.</p>
+      <p class="hero-copy">Pick a model, show a sign to your camera, and SignBridge builds your message — letter by letter from a photo or your hand skeleton, or whole words from a short video.</p>
+    </section>
+
+    <section class="model-picker" role="tablist" aria-label="Choose a recognition model">
+      <button class="model-option active" id="modeAlphabet" type="button" role="tab" aria-selected="true" data-mode="alphabet">
+        <i class="model-dot" data-model-dot="alphabet" title="Checking…"></i>
+        <strong>Alphabet</strong>
+        <span>Photo model · one frame</span>
+      </button>
+      <button class="model-option" id="modeFingerspelling" type="button" role="tab" aria-selected="false" data-mode="fingerspelling">
+        <i class="model-dot" data-model-dot="fingerspelling" title="Checking…"></i>
+        <strong>Fingerspelling</strong>
+        <span>Hand-landmark model · background independent</span>
+      </button>
+      <button class="model-option" id="modeWord" type="button" role="tab" aria-selected="false" data-mode="word">
+        <i class="model-dot" data-model-dot="word" title="Checking…"></i>
+        <strong>Word</strong>
+        <span>Video model · 3-second clip</span>
+      </button>
     </section>
 
     <section class="workspace" aria-label="Translator">
       <div class="camera-card">
         <div class="card-heading">
-          <div><span class="step">01</span><h2>Show a sign</h2></div>
+          <div><span class="step">01</span><h2 id="stageTitle">Show a sign</h2></div>
           <button id="flipButton" class="icon-button" type="button" title="Switch camera" aria-label="Switch camera">↻</button>
         </div>
         <div class="camera-stage" id="cameraStage">
           <video id="video" autoplay muted playsinline></video>
           <canvas id="canvas" hidden></canvas>
-          <div class="hand-guide" aria-hidden="true"><span>Place hand here</span></div>
+          <div class="hand-guide" aria-hidden="true"><span id="guideLabel">Place hand here</span></div>
           <div id="cameraEmpty" class="camera-empty">
             <div class="hand-icon" aria-hidden="true">✋</div>
             <strong>Camera is off</strong>
@@ -45,7 +63,7 @@
           <button id="cameraButton" class="button secondary" type="button">Start camera</button>
           <button id="captureButton" class="button primary" type="button" disabled>Recognize sign</button>
         </div>
-        <p class="privacy">Images are processed for recognition and are not stored.</p>
+        <p class="privacy" id="privacyNote">Images are processed for recognition and are not stored.</p>
       </div>
 
       <div class="result-card">
@@ -57,7 +75,7 @@
         <div id="predictionEmpty" class="prediction-empty">
           <span>Recognition result</span>
           <strong>—</strong>
-          <p>Start the camera and show a sign.</p>
+          <p id="predictionHint">Start the camera and show a sign.</p>
         </div>
         <div id="predictionResult" class="prediction-result" hidden>
           <div class="letter" id="letter">A</div>
@@ -71,7 +89,7 @@
         <div id="alternatives" class="alternatives" hidden></div>
 
         <label for="message">Your message</label>
-        <textarea id="message" rows="4" maxlength="240" placeholder="Recognized letters appear here…"></textarea>
+        <textarea id="message" rows="4" maxlength="240" placeholder="Recognized signs appear here…"></textarea>
         <div class="message-actions">
           <span id="characterCount">0 / 240</span>
           <div>
@@ -93,8 +111,8 @@
       <h2>For a clearer result</h2>
       <div class="tip-grid">
         <article><b>01</b><h3>Use even light</h3><p>Face a window or light source. Avoid strong shadows behind your hand.</p></article>
-        <article><b>02</b><h3>Keep it simple</h3><p>Use a plain background and keep only one hand inside the guide.</p></article>
-        <article><b>03</b><h3>Hold steady</h3><p>Pause briefly before recognition so the image stays sharp.</p></article>
+        <article><b>02</b><h3>Match the model</h3><p>The photo and landmark models read single letters. The word model reads one flowing sign over three seconds.</p></article>
+        <article><b>03</b><h3>Hold steady</h3><p>Pause briefly before recognition so the image stays sharp and the tracked landmarks settle.</p></article>
       </div>
     </section>
   </main>

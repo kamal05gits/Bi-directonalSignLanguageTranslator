@@ -1,0 +1,10 @@
+# Optional dependencies for the CISLR word model (video recognition).
+# The base API runs all three endpoints without these, but /api/predict/word
+# needs PyTorch (I3D feature extractor) and OpenCV (video decoding), plus the
+# Git LFS checkpoint (git lfs pull).
+#
+# CPU-only servers should install from the PyTorch CPU index to avoid large
+# CUDA downloads:
+#   pip install -r backend/requirements-word.txt --extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.6.0
+opencv-python-headless==4.10.0.84

@@ -10,6 +10,6 @@ CISLR
 training
 *.mp4
 *.avi
-backend/i3d
-backend/models/cislr
-backend/models/fingerspelling
+# The 57 MB I3D checkpoint stays out of the Docker build context; the
+# Dockerfile downloads it when built with WITH_WORD_MODEL=true.
+backend/i3d/weights
