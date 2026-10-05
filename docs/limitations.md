@@ -4,21 +4,28 @@ SignBridge is an assistive prototype. These constraints are displayed honestly i
 
 ## Alphabet photo model
 
-- Recognizes static, single-frame alphabet signs only. Letters that involve motion in ISL (such as J and Z conventions that draw shapes) cannot be represented by a 64×64 photo classifier.
+- Recognizes static, single-frame alphabet signs only. Letters that involve motion in ISL (such as J and Z conventions that draw shapes) cannot be represented by a photo classifier.
 - Sensitive to lighting, background clutter, skin-tone differences in the training data, and camera framing.
+- Classifier is a `RandomForestClassifier` over the flattened 32×32×3 pixel vector (`backend/app/services/alphabet_predictor.py`).
 
 ## Fingerspelling landmark model
 
 - Depends on the MediaPipe hand tracker running in the browser; when the tracker fails (occlusion, fast motion, low light), no landmarks are sent and the UI asks the user to retry instead of guessing.
 - Assumes the same wrist-relative coordinate conventions as the training vectors (`backend/app/vision/landmarks.py`).
 - The MediaPipe library loads from a CDN the first time this mode is used; the mode is unavailable fully offline.
+- Classifier is a `RandomForestClassifier` over the 126-value landmark vector directly (no feature extraction network).
 
 ## CISLR word model
 
 - Vocabulary is limited to the 82 CISLR classes bundled in `CISLR_LABELS.json`.
 - Known modest top-1 accuracy from the underlying I3D checkpoint; predictions are suggestions, not transcriptions.
 - Each request runs a full I3D forward pass over 90 frames — expect several seconds of latency on a small CPU instance.
-- Requires the 57 MB Git LFS checkpoint plus PyTorch and OpenCV. When any piece is missing, `/api/health` marks the model unavailable and `/api/predict/word` returns HTTP 503 with the remediation step. It never fabricates a prediction.
+- Requires the 57 MB Git LFS checkpoint plus PyTorch and OpenCV for I3D feature extraction. When any piece is missing, `/api/health` marks the model unavailable and `/api/predict/word` returns HTTP 503 with the remediation step. It never fabricates a prediction.
+- The final classifier is a `RandomForestClassifier` over the pooled (mean + std) I3D feature vector, not a neural network.
+
+## All three Random Forest models
+
+- **None ships with a real training dataset.** `backend/app/ml/train_alphabet_rf.py`, `train_fingerspelling_rf.py`, and `train_word_rf.py` train on a small synthetic placeholder dataset (`app.ml.synthetic_data`) by default so the API has a working model out of the box - it does **not** reflect real hands, photos, or signed words. Pass `--images-dir`, `--landmarks-csv`, or `--features-csv` with real data and retrain before relying on these models for real recognition.
 
 ## Continuous recognition (`/api/continuous`)
 
@@ -31,7 +38,8 @@ SignBridge is an assistive prototype. These constraints are displayed honestly i
 
 ## Emergency phrases (`/api/emergency`)
 
-- **Prototype only.** It does not call police, an ambulance, or any real dispatch/SMS/telephony service. It only displays and speaks a pre-translated phrase and keeps an in-memory log for demo purposes. Do not rely on it in a genuine emergency.
+- Displays and speaks a pre-translated phrase and keeps an in-memory log of every alert.
+- **Real dispatch is optional and limited.** When `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM_NUMBER`, and `TWILIO_ALERT_TO_NUMBER` are configured, raising an alert sends a real SMS and places a real voice call via Twilio - but only to one fixed, operator-configured contact number, not to police or an ambulance service directly, and with no location data. Without those variables, it is a **prototype only**: no telephony, SMS, or dispatch provider is contacted. Either way, do not rely on this as a substitute for dialing your local emergency number.
 
 ## All models
 

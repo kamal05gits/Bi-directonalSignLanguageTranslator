@@ -1,17 +1,16 @@
-"""Prototype emergency-phrase module.
+"""Emergency-phrase module.
 
-This is explicitly **not** connected to real emergency dispatch: there is no
-telephony, SMS gateway, or location service configured. What it gives a
-deaf/hard-of-hearing user is fast, one-tap access to a small set of
+Gives a deaf/hard-of-hearing user fast, one-tap access to a small set of
 pre-translated, high-value phrases that can be shown (large on-screen text)
-and spoken aloud to a bystander - useful on its own - plus an in-memory audit
-log of when an alert was raised, so a real provider (e.g. Twilio, a campus
-security webhook) has one obvious place to be plugged in later
-(:class:`EmergencyLog.record`).
+and spoken aloud to a bystander, plus an in-memory audit log of when an
+alert was raised.
 
-Every response from the API built on top of this module says plainly that no
-real service was contacted, matching the project's policy of never
-fabricating a capability it does not have.
+Real dispatch is optional and handled by :mod:`app.services.notifications`
+(Twilio SMS + voice call) - see :class:`app.services.notifications.TwilioNotifier`.
+When Twilio is not configured (no ``TWILIO_*`` environment variables), this
+stays a prototype exactly as before: no telephony, SMS gateway, or location
+service is contacted, and the API says so plainly rather than fabricating a
+capability it does not have.
 """
 
 from __future__ import annotations
@@ -49,17 +48,36 @@ class EmergencyAlert:
     phrase_id: str
     language: str
     timestamp: float = field(default_factory=time.time)
+    dispatched: bool = False
+    sms_sid: str | None = None
+    call_sid: str | None = None
+    dispatch_errors: list[str] = field(default_factory=list)
 
 
 class EmergencyLog:
-    """In-memory alert log. Not a substitute for a real dispatch integration."""
+    """In-memory alert log, including whether a real Twilio dispatch happened."""
 
     def __init__(self, max_entries: int = 200) -> None:
         self._alerts: list[EmergencyAlert] = []
         self._max_entries = max_entries
 
-    def record(self, phrase_id: str, language: str) -> EmergencyAlert:
-        alert = EmergencyAlert(phrase_id=phrase_id, language=language)
+    def record(
+        self,
+        phrase_id: str,
+        language: str,
+        dispatched: bool = False,
+        sms_sid: str | None = None,
+        call_sid: str | None = None,
+        dispatch_errors: list[str] | None = None,
+    ) -> EmergencyAlert:
+        alert = EmergencyAlert(
+            phrase_id=phrase_id,
+            language=language,
+            dispatched=dispatched,
+            sms_sid=sms_sid,
+            call_sid=call_sid,
+            dispatch_errors=dispatch_errors or [],
+        )
         self._alerts.append(alert)
         del self._alerts[: -self._max_entries]
         return alert

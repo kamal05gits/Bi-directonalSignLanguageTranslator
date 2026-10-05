@@ -1,7 +1,7 @@
 """Unit tests for the three model services.
 
-These tests avoid TensorFlow, PyTorch, and OpenCV entirely so they run in the
-minimal CI environment (pytest + numpy only).
+These tests avoid scikit-learn, PyTorch, and OpenCV entirely so they run in
+the minimal CI environment (pytest + numpy only).
 """
 
 import json
@@ -10,8 +10,9 @@ import numpy as np
 import pytest
 
 from app.services.fingerspelling_predictor import FEATURE_DIM, FingerspellingPredictor
-from app.services.keras_classifier import LazyKerasClassifier, read_labels
-from app.services.word_predictor import WordPredictor, is_lfs_pointer
+from app.services.model_base import read_labels
+from app.services.random_forest_classifier import LazyRandomForestClassifier
+from app.services.word_predictor import WordPredictor, is_lfs_pointer, pool_features
 
 
 def _write_labels(tmp_path, name="labels.json", values=None):
@@ -31,7 +32,7 @@ def test_read_labels_rejects_non_string_arrays(tmp_path):
 
 
 def _fingerspelling(tmp_path):
-    return FingerspellingPredictor(tmp_path / "model.keras", _write_labels(tmp_path))
+    return FingerspellingPredictor(tmp_path / "model.joblib", _write_labels(tmp_path))
 
 
 def test_fingerspelling_rejects_wrong_vector_length(tmp_path):
@@ -54,23 +55,33 @@ def test_fingerspelling_rejects_empty_hands(tmp_path):
         predictor.predict([0.0] * FEATURE_DIM)
 
 
-class _FakeKerasModel:
-    def predict(self, batch, verbose=0):
+class _FakeForestModel:
+    n_classes_ = 2
+
+    def predict_proba(self, batch):
         assert batch.shape == (1, 2)
         return np.asarray([[0.2, 0.8]], dtype=np.float32)
 
 
-def test_lazy_classifier_ranks_top_k_without_tensorflow(tmp_path, monkeypatch):
-    predictor = LazyKerasClassifier(tmp_path / "model.keras", _write_labels(tmp_path))
-    monkeypatch.setattr(predictor, "_load", lambda: _FakeKerasModel())
+def test_lazy_classifier_ranks_top_k_without_sklearn(tmp_path, monkeypatch):
+    predictor = LazyRandomForestClassifier(tmp_path / "model.joblib", _write_labels(tmp_path))
+    monkeypatch.setattr(predictor, "_load", lambda: _FakeForestModel())
     result = predictor._predict_array(np.zeros((1, 2), dtype=np.float32), top_k=2)
     assert [item.label for item in result] == ["b", "a"]
     assert result[0].confidence == pytest.approx(0.8)
 
 
+def test_pool_features_concatenates_mean_and_std():
+    sequence = np.stack([np.zeros(4), np.full(4, 2.0)])
+    pooled = pool_features(sequence)
+    assert pooled.shape == (8,)
+    assert np.allclose(pooled[:4], 1.0)  # mean of 0 and 2
+    assert np.allclose(pooled[4:], 1.0)  # std of 0 and 2
+
+
 def _word_predictor(tmp_path):
     return WordPredictor(
-        model_path=tmp_path / "CISLR_MODEL.keras",
+        model_path=tmp_path / "CISLR_MODEL_rf.joblib",
         labels_path=_write_labels(tmp_path, "CISLR_LABELS.json"),
         normalization_path=tmp_path / "CISLR_NORMALIZATION.npz",
         weights_path=tmp_path / "weights.pt",
@@ -86,7 +97,7 @@ def test_word_availability_reports_missing_classifier(tmp_path):
 
 def test_word_availability_detects_lfs_pointer(tmp_path):
     predictor = _word_predictor(tmp_path)
-    predictor.model_path.write_bytes(b"keras")
+    predictor.model_path.write_bytes(b"joblib")
     np.savez(tmp_path / "CISLR_NORMALIZATION.npz", mean=np.zeros(4), std=np.ones(4))
     predictor.weights_path.write_bytes(b"version https://git-lfs.github.com/spec/v1\noid sha256:abc\nsize 10\n")
     available, detail = predictor.availability()

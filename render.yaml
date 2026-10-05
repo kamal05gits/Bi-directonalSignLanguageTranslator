@@ -1,7 +1,9 @@
 # Lean deployment: alphabet photo model + hand-landmark fingerspelling model.
-# To also deploy the CISLR word model, set the Dockerfile default
+# All three recognition models are scikit-learn Random Forest classifiers, so
+# memory needs are modest. To also deploy the CISLR word model (I3D feature
+# extraction needs PyTorch + OpenCV), set the Dockerfile default
 # `ARG WITH_WORD_MODEL=true` before deploying and use at least the Standard
-# plan (TensorFlow + PyTorch need more memory than Starter provides).
+# plan.
 services:
   - type: web
     name: signbridge-isl-translator
@@ -15,3 +17,15 @@ services:
         value: "0.70"
       - key: PYTHON_VERSION
         value: "3.11.11"
+      # Optional real emergency dispatch (SMS + voice call) via Twilio.
+      # Leave unset to keep /api/emergency/alert as a logged-only prototype.
+      # Set these in the Render dashboard (Environment tab) - never commit
+      # real values to this file.
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+      - key: TWILIO_FROM_NUMBER
+        sync: false
+      - key: TWILIO_ALERT_TO_NUMBER
+        sync: false

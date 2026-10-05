@@ -1,23 +1,26 @@
-"""Landmark-vector inference for the fingerspelling MLP classifier."""
+"""Landmark-vector inference for the fingerspelling Random Forest classifier."""
 
 from __future__ import annotations
 
 import numpy as np
 
-from .keras_classifier import LazyKerasClassifier, Prediction
+from .random_forest_classifier import LazyRandomForestClassifier, Prediction
 
 # 2 hands x 21 landmarks x (x, y, z); matches app.vision.landmarks.FEATURE_DIM.
 FEATURE_DIM = 126
 
+__all__ = ["FingerspellingPredictor", "Prediction", "FEATURE_DIM"]
 
-class FingerspellingPredictor(LazyKerasClassifier):
+
+class FingerspellingPredictor(LazyRandomForestClassifier):
     """Classify a 126-value hand-landmark vector into an ISL alphabet letter.
 
     The vector layout matches ``app.vision.landmarks.extract_landmark_features``:
     the left hand occupies values 0-62 and the right hand values 63-125, with
     each point stored as wrist-relative ``(x, y, z)`` and invisible hands left
     as zeros. Landmarks are extracted in the browser with MediaPipe, so the
-    server needs neither a camera nor MediaPipe itself.
+    server needs neither a camera nor MediaPipe itself. A Random Forest
+    classifies the vector directly - no neural network is involved.
     """
 
     name = "fingerspelling"

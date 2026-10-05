@@ -1,38 +1,31 @@
-"""Shared lazy-loading helpers for the bundled Keras classifiers."""
+"""Shared lazy-loading helpers for the bundled Random Forest classifiers.
+
+All three recognition models (alphabet, fingerspelling, word) are
+``sklearn.ensemble.RandomForestClassifier`` instances serialized with
+``joblib``. They are trained so that the class index lines up with the
+position of each label in the matching ``*_labels.json`` file (index ``i``
+of ``model.classes_`` always corresponds to ``labels[i]``), so ranking a
+prediction never needs to look at ``model.classes_`` at inference time.
+
+scikit-learn is imported lazily so health checks stay fast and the process
+never pays the import cost for a model that is never used.
+"""
 
 from __future__ import annotations
 
-import json
 import threading
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 
+from .model_base import Prediction, read_labels
 
-@dataclass
-class Prediction:
-    label: str
-    confidence: float
+__all__ = ["LazyRandomForestClassifier", "Prediction", "read_labels"]
 
 
-def read_labels(labels_path: Path, name: str) -> list[str]:
-    """Read a JSON string-array labels file, returning [] when it is absent."""
-    if not labels_path.is_file():
-        return []
-    labels = json.loads(labels_path.read_text(encoding="utf-8"))
-    if not isinstance(labels, list) or not all(isinstance(item, str) for item in labels):
-        raise ValueError(f"{name} labels must be a JSON string array.")
-    return labels
-
-
-class LazyKerasClassifier:
-    """Load a Keras classifier on first use and rank its top-k labels.
-
-    TensorFlow is imported lazily so health checks stay fast and deployments
-    that only need a subset of the models do not pay the startup cost twice.
-    """
+class LazyRandomForestClassifier:
+    """Load a Random Forest classifier on first use and rank its top-k labels."""
 
     name = "model"
 
@@ -61,11 +54,18 @@ class LazyKerasClassifier:
                 if not self.labels:
                     raise RuntimeError(f"{self.name.capitalize()} labels are missing: {self.labels_path}")
                 try:
-                    import tensorflow as tf
+                    import joblib
 
-                    self._model = tf.keras.models.load_model(self.model_path, compile=False)
-                except Exception as exc:  # TensorFlow emits several loader exception types.
+                    model = joblib.load(self.model_path)
+                except Exception as exc:  # joblib/pickle raise several loader exception types.
                     raise RuntimeError(f"Could not load the {self.name} model: {exc}") from exc
+                n_classes = getattr(model, "n_classes_", None)
+                if n_classes is not None and n_classes != len(self.labels):
+                    raise RuntimeError(
+                        f"{self.name.capitalize()} model has {n_classes} classes but "
+                        f"{len(self.labels)} labels are configured."
+                    )
+                self._model = model
         return self._model
 
     def _rank(self, probabilities: np.ndarray, top_k: int) -> list[Prediction]:
@@ -81,5 +81,5 @@ class LazyKerasClassifier:
     def _predict_array(self, batch: np.ndarray, top_k: int) -> list[Prediction]:
         model = self._load()
         with self._lock:
-            probabilities = np.asarray(model.predict(batch, verbose=0))[0]
+            probabilities = np.asarray(model.predict_proba(batch))[0]
         return self._rank(probabilities, top_k)

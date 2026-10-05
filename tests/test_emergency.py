@@ -61,3 +61,61 @@ def test_emergency_alert_is_acknowledged_but_not_a_real_dispatch(client):
 def test_emergency_alert_rejects_unknown_phrase_id(client):
     response = client.post("/api/emergency/alert", json={"phrase_id": "nope"})
     assert response.status_code == 404
+
+
+def test_emergency_status_reports_twilio_not_configured_by_default(client):
+    response = client.get("/api/emergency/status")
+    assert response.status_code == 200
+    assert response.json()["twilio_configured"] is False
+
+
+def test_emergency_alert_dispatches_via_twilio_when_configured():
+    """Wire a fake-but-configured TwilioNotifier straight into the router,
+    bypassing the real `twilio` package and network calls entirely."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from app.language.translator import DictionaryTranslator
+    from app.routes.emergency import build_router
+    from app.services.notifications import TwilioNotifier, TwilioSettings
+
+    class _FakeMessage:
+        sid = "SM999"
+
+    class _FakeCall:
+        sid = "CA999"
+
+    class _FakeClient:
+        class messages:
+            @staticmethod
+            def create(**kwargs):
+                return _FakeMessage()
+
+        class calls:
+            @staticmethod
+            def create(**kwargs):
+                return _FakeCall()
+
+    notifier = TwilioNotifier(
+        settings=TwilioSettings(
+            account_sid="AC1",
+            auth_token="token",
+            from_number="+15550000000",
+            to_number="+15551111111",
+        )
+    )
+    notifier._client = _FakeClient()
+
+    app = FastAPI()
+    app.include_router(build_router(DictionaryTranslator(), notifier=notifier))
+    client = TestClient(app)
+
+    status = client.get("/api/emergency/status").json()
+    assert status["twilio_configured"] is True
+
+    response = client.post("/api/emergency/alert", json={"phrase_id": "help"})
+    data = response.json()
+    assert data["dispatched"] is True
+    assert data["sms_sid"] == "SM999"
+    assert data["call_sid"] == "CA999"
+    assert "real alert dispatched via twilio" in data["note"].lower()

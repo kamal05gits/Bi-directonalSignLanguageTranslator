@@ -1,17 +1,21 @@
 """FastAPI application for the bidirectional sign-language translator.
 
-Three recognition models are served behind one API:
+Three recognition models are served behind one API. All three are
+``scikit-learn`` Random Forest classifiers (no neural network/TensorFlow
+dependency remains):
 
-- ``alphabet``: single-frame 64x64 photo CNN (bundled, always deployable).
-- ``fingerspelling``: MLP over a 126-value MediaPipe hand-landmark vector
-  extracted in the browser (bundled, always deployable).
-- ``word``: CISLR word classifier over I3D video features. It needs the Git
-  LFS checkpoint plus optional PyTorch/OpenCV dependencies, and reports itself
-  honestly as unavailable when those are missing.
+- ``alphabet``: Random Forest over a flattened 32x32 photo (bundled, always
+  deployable).
+- ``fingerspelling``: Random Forest over a 126-value MediaPipe hand-landmark
+  vector extracted in the browser (bundled, always deployable).
+- ``word``: Random Forest over pooled I3D video features. It needs the Git
+  LFS checkpoint plus optional PyTorch/OpenCV dependencies for the I3D
+  feature extractor, and reports itself honestly as unavailable when those
+  are missing.
 
-The heavy models are loaded lazily, so health checks remain responsive while a
-Render instance starts. The same service hosts the static web client and its
-JSON API, avoiding CORS and cross-origin camera issues.
+The heavy I3D feature extractor is loaded lazily, so health checks remain
+responsive while a Render instance starts. The same service hosts the static
+web client and its JSON API, avoiding CORS and cross-origin camera issues.
 """
 
 from __future__ import annotations
@@ -35,17 +39,17 @@ from .routes import emergency as emergency_routes
 from .routes import language as language_routes
 from .services.alphabet_predictor import AlphabetPredictor
 from .services.fingerspelling_predictor import FEATURE_DIM, FingerspellingPredictor
-from .services.keras_classifier import Prediction
+from .services.model_base import Prediction
 from .services.word_predictor import WordPredictor
 
 LOGGER = logging.getLogger(__name__)
 ROOT = Path(__file__).resolve().parents[2]
 FRONTEND = ROOT / "frontend"
-MODEL = Path(os.getenv("ALPHABET_MODEL_PATH", ROOT / "backend/models/alphabet/isl_alphabet_model.keras"))
+MODEL = Path(os.getenv("ALPHABET_MODEL_PATH", ROOT / "backend/models/alphabet/isl_alphabet_model_rf.joblib"))
 LABELS = Path(os.getenv("ALPHABET_LABELS_PATH", ROOT / "backend/models/alphabet/alphabet_labels.json"))
-FINGERSPELLING_MODEL = Path(os.getenv("FINGERSPELLING_MODEL_PATH", ROOT / "backend/models/fingerspelling/isl_fingerspelling_model.keras"))
+FINGERSPELLING_MODEL = Path(os.getenv("FINGERSPELLING_MODEL_PATH", ROOT / "backend/models/fingerspelling/isl_fingerspelling_model_rf.joblib"))
 FINGERSPELLING_LABELS = Path(os.getenv("FINGERSPELLING_LABELS_PATH", ROOT / "backend/models/fingerspelling/isl_fingerspelling_labels.json"))
-WORD_MODEL = Path(os.getenv("WORD_MODEL_PATH", ROOT / "backend/models/cislr/CISLR_MODEL.keras"))
+WORD_MODEL = Path(os.getenv("WORD_MODEL_PATH", ROOT / "backend/models/cislr/CISLR_MODEL_rf.joblib"))
 WORD_LABELS = Path(os.getenv("WORD_LABELS_PATH", ROOT / "backend/models/cislr/CISLR_LABELS.json"))
 WORD_NORMALIZATION = Path(os.getenv("WORD_NORMALIZATION_PATH", ROOT / "backend/models/cislr/CISLR_NORMALIZATION.npz"))
 I3D_WEIGHTS = Path(os.getenv(
@@ -223,7 +227,10 @@ def info() -> dict[str, object]:
         "features": {
             "continuous_recognition": "POST /api/continuous/session then stream landmark frames",
             "translation_languages": list(translator.LANGUAGES.keys()),
-            "emergency_phrases": "GET /api/emergency/phrases (prototype; not real dispatch)",
+            "emergency_phrases": (
+                "GET /api/emergency/phrases; POST /api/emergency/alert sends a real Twilio SMS/call "
+                "when TWILIO_* env vars are configured, otherwise it is a logged-only prototype"
+            ),
         },
         "models": {
             "alphabet": {

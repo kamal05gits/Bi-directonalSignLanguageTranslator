@@ -1,18 +1,26 @@
-"""CISLR word-level recognition: short video -> I3D features -> Keras classifier.
+"""CISLR word-level recognition: short video -> I3D features -> Random Forest.
 
-The pipeline mirrors ``backend/final_demo_inference.py``:
+The pipeline mirrors ``backend/final_demo_inference.py`` for the feature
+extraction stage, but classifies with a ``RandomForestClassifier`` instead of
+a neural network:
 
 1. Decode the uploaded video and resample it to 90 frames.
 2. Resize each frame so the shorter side is 224 px, then center-crop to 224x224.
-3. Extract 1024-d features with the I3D network (WLASL asl2000 checkpoint).
-4. Resample the feature sequence to (32, 1024) and normalize with the
-   training statistics stored in ``CISLR_NORMALIZATION.npz``.
-5. Classify with ``CISLR_MODEL.keras`` into one of the CISLR word labels.
+3. Extract 1024-d features per frame with the I3D network (WLASL asl2000
+   checkpoint).
+4. Resample the per-frame feature sequence to (32, 1024) and normalize with
+   the training statistics stored in ``CISLR_NORMALIZATION.npz``.
+5. Pool the normalized sequence over time (mean and standard deviation of
+   each of the 1024 channels), producing one flat 2048-value feature vector.
+6. Classify that vector with ``CISLR_MODEL.joblib`` (a Random Forest) into
+   one of the CISLR word labels.
 
-PyTorch, OpenCV, and the 57 MB I3D checkpoint are heavyweight optional
-dependencies. Everything is imported lazily, and missing pieces are reported
-honestly through :meth:`WordPredictor.availability` instead of failing at
-import time, so the rest of the service keeps working without them.
+PyTorch and OpenCV remain required for steps 1-4 (there is no way around
+running the I3D feature extractor on real video), but the final classifier
+is now scikit-learn rather than Keras/TensorFlow. Everything is imported
+lazily, and missing pieces are reported honestly through
+:meth:`WordPredictor.availability` instead of failing at import time, so the
+rest of the service keeps working without them.
 """
 
 from __future__ import annotations
@@ -27,7 +35,7 @@ from typing import Any
 
 import numpy as np
 
-from .keras_classifier import LazyKerasClassifier, Prediction
+from .random_forest_classifier import LazyRandomForestClassifier, Prediction
 
 LOGGER = logging.getLogger(__name__)
 
@@ -49,7 +57,18 @@ def is_lfs_pointer(path: Path) -> bool:
         return False
 
 
-class WordPredictor(LazyKerasClassifier):
+def pool_features(sequence: np.ndarray) -> np.ndarray:
+    """Pool a (time, channels) feature sequence into one flat vector.
+
+    Concatenates the per-channel mean and standard deviation across time,
+    which keeps the Random Forest input a fixed, modest size (2 * channels)
+    regardless of how many frames the clip was resampled to.
+    """
+    sequence = np.asarray(sequence, dtype=np.float32)
+    return np.concatenate([sequence.mean(axis=0), sequence.std(axis=0)]).astype(np.float32)
+
+
+class WordPredictor(LazyRandomForestClassifier):
     """Recognize a signed word from a short video clip."""
 
     name = "word"
@@ -214,7 +233,8 @@ class WordPredictor(LazyKerasClassifier):
             features = self._extract_features(frames)
             mean, std = self._load_normalization()
             normalized = np.nan_to_num((features - mean) / std, nan=0.0, posinf=0.0, neginf=0.0)
-            return self._predict_array(normalized[np.newaxis, ...].astype(np.float32), top_k)
+            pooled = pool_features(normalized)
+            return self._predict_array(pooled[np.newaxis, :].astype(np.float32), top_k)
         finally:
             if temp_path is not None:
                 temp_path.unlink(missing_ok=True)

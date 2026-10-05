@@ -14,7 +14,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 from app.main import app  # noqa: E402
 import app.main as main  # noqa: E402
-from app.services.keras_classifier import Prediction  # noqa: E402
+from app.services.model_base import Prediction  # noqa: E402
 
 
 class StubPredictor:
