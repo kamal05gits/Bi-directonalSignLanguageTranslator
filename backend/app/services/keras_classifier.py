@@ -4,16 +4,17 @@ from __future__ import annotations
 
 import json
 import threading
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import numpy as np
-from pydantic import BaseModel, Field
 
 
-class Prediction(BaseModel):
+@dataclass
+class Prediction:
     label: str
-    confidence: float = Field(ge=0, le=1)
+    confidence: float
 
 
 def read_labels(labels_path: Path, name: str) -> list[str]:
