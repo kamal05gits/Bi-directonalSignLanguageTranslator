@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#111827">
+  <meta name="description" content="Camera-based Indian Sign Language fingerspelling translator">
+  <title>SignBridge — ISL Translator</title>
+  <link rel="stylesheet" href="/assets/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="SignBridge home">
+      <span class="brand-mark" aria-hidden="true">SB</span>
+      <span>SignBridge <small>ISL translator</small></span>
+    </a>
+    <div id="apiStatus" class="status"><i></i><span>Connecting</span></div>
+  </header>
+
+  <main>
+    <section class="hero">
+      <p class="eyebrow">Indian Sign Language · Fingerspelling</p>
+      <h1>Let your hands<br><em>do the talking.</em></h1>
+      <p class="hero-copy">Show one alphabet sign to your camera. SignBridge recognizes it and helps you build a message, one letter at a time.</p>
+    </section>
+
+    <section class="workspace" aria-label="Translator">
+      <div class="camera-card">
+        <div class="card-heading">
+          <div><span class="step">01</span><h2>Show a sign</h2></div>
+          <button id="flipButton" class="icon-button" type="button" title="Switch camera" aria-label="Switch camera">↻</button>
+        </div>
+        <div class="camera-stage" id="cameraStage">
+          <video id="video" autoplay muted playsinline></video>
+          <canvas id="canvas" hidden></canvas>
+          <div class="hand-guide" aria-hidden="true"><span>Place hand here</span></div>
+          <div id="cameraEmpty" class="camera-empty">
+            <div class="hand-icon" aria-hidden="true">✋</div>
+            <strong>Camera is off</strong>
+            <span>Your browser will ask for permission.</span>
+          </div>
+          <div id="countdown" class="countdown" hidden></div>
+        </div>
+        <div class="camera-actions">
+          <button id="cameraButton" class="button secondary" type="button">Start camera</button>
+          <button id="captureButton" class="button primary" type="button" disabled>Recognize sign</button>
+        </div>
+        <p class="privacy">Images are processed for recognition and are not stored.</p>
+      </div>
+
+      <div class="result-card">
+        <div class="card-heading">
+          <div><span class="step">02</span><h2>Build your message</h2></div>
+          <button id="clearButton" class="text-button" type="button">Clear</button>
+        </div>
+
+        <div id="predictionEmpty" class="prediction-empty">
+          <span>Recognition result</span>
+          <strong>—</strong>
+          <p>Start the camera and show a sign.</p>
+        </div>
+        <div id="predictionResult" class="prediction-result" hidden>
+          <div class="letter" id="letter">A</div>
+          <div class="confidence-wrap">
+            <span id="predictionState">Recognized</span>
+            <strong id="confidence">0%</strong>
+            <div class="meter"><i id="confidenceMeter"></i></div>
+          </div>
+          <button id="addButton" class="button add" type="button">Add letter</button>
+        </div>
+        <div id="alternatives" class="alternatives" hidden></div>
+
+        <label for="message">Your message</label>
+        <textarea id="message" rows="4" maxlength="240" placeholder="Recognized letters appear here…"></textarea>
+        <div class="message-actions">
+          <span id="characterCount">0 / 240</span>
+          <div>
+            <button id="spaceButton" class="small-button" type="button">Space</button>
+            <button id="backspaceButton" class="small-button" type="button">⌫</button>
+            <button id="speakButton" class="small-button accent" type="button">Speak aloud</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="reverse-card">
+      <div><span class="step">03</span><h2>Text to fingerspelling</h2></div>
+      <p>Type text above to see the alphabet sequence a signer can follow.</p>
+      <div id="fingerSequence" class="finger-sequence"><span class="sequence-empty">Your sequence will appear here</span></div>
+    </section>
+
+    <section class="tips">
+      <h2>For a clearer result</h2>
+      <div class="tip-grid">
+        <article><b>01</b><h3>Use even light</h3><p>Face a window or light source. Avoid strong shadows behind your hand.</p></article>
+        <article><b>02</b><h3>Keep it simple</h3><p>Use a plain background and keep only one hand inside the guide.</p></article>
+        <article><b>03</b><h3>Hold steady</h3><p>Pause briefly before recognition so the image stays sharp.</p></article>
+      </div>
+    </section>
+  </main>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <footer><span>SignBridge</span><p>Assistive technology prototype · Results can be inaccurate; verify important communication.</p></footer>
+  <script src="/assets/app.js" defer></script>
+</body>
+</html>

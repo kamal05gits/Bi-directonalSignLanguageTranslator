@@ -1,0 +1,15 @@
+.git
+.github
+.venv
+__pycache__
+*.py[cod]
+.pytest_cache
+node_modules
+dist
+CISLR
+training
+*.mp4
+*.avi
+backend/i3d
+backend/models/cislr
+backend/models/fingerspelling

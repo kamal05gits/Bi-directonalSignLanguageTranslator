@@ -1,0 +1,3 @@
+from app.vision.landmarks import extract_landmark_features
+
+extract_frame_features = extract_landmark_features
