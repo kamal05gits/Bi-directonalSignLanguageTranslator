@@ -15,3 +15,17 @@ services:
         value: "0.70"
       - key: PYTHON_VERSION
         value: "3.11.11"
+      # Twilio emergency alerts: set these to deliver SMS + voice calls to your
+      # own number. Without them, emergency phrases stay on-screen/spoken only.
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+      - key: TWILIO_FROM_NUMBER
+        sync: false
+      - key: EMERGENCY_TO_NUMBER
+        sync: false
+      - key: EMERGENCY_SMS_ENABLED
+        value: "true"
+      - key: EMERGENCY_VOICE_CALL_ENABLED
+        value: "true"

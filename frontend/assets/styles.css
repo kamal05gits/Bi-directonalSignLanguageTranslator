@@ -40,3 +40,21 @@
 .emergency-phrase button{border:0;background:var(--danger);color:#fff;border-radius:8px;padding:8px 12px;font:700 11px 'DM Sans';cursor:pointer}
 .emergency-banner{position:fixed;left:50%;top:18px;transform:translateX(-50%);background:var(--danger);color:#fff;padding:16px 26px;border-radius:14px;font:800 20px Manrope;z-index:110;box-shadow:var(--shadow);text-align:center;max-width:90vw}
 @media(max-width:800px){.translate-controls{flex-direction:column}.mute-toggle{margin-left:0}}
+
+/* --- Combined mode (three-model ensemble) + Twilio emergency status --- */
+/* Author display rules otherwise override the UA's [hidden] handling. */
+[hidden]{display:none !important}
+.model-picker{grid-template-columns:repeat(auto-fit,minmax(196px,1fr))}
+.prediction-result{grid-template-rows:1fr auto auto}
+.letter{grid-row:1/4}
+.model-chips{grid-column:2;display:flex;flex-wrap:wrap;gap:6px;align-content:center}
+.chip{display:inline-flex;align-items:center;gap:4px;border:1px solid var(--line);background:#f6f8f4;border-radius:999px;padding:4px 10px;font:600 11px 'DM Sans';color:var(--muted)}
+.chip b{color:var(--ink);text-transform:uppercase}
+.chip.ok{border-color:#d8eccf;background:#f0f7ea;color:#3d6b4d}
+.chip.ok b{color:#2f5540}
+.chip.down{border-color:#f3d7ce;background:#fdf1ec;color:#a2482f}
+.chip.warn{border-color:#f3e3b3;background:#fdf8e7;color:#8a6d1f}
+.alternatives .word-candidate{border:1px solid #d8eccf;background:#f0f7ea;color:#2f5540}
+.emergency-status{margin:10px 0 0;border-radius:10px;padding:9px 11px;font:600 12px 'DM Sans';border:1px solid var(--line);background:#f6f8f4;color:var(--muted)}
+.emergency-status.ok{background:#f0f7ea;border-color:#d8eccf;color:#2f5540}
+.emergency-status.warn{background:#fdf8e7;border-color:#f3e3b3;color:#8a6d1f}
