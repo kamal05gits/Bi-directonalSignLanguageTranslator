@@ -27,10 +27,11 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
 from PIL import Image, ImageOps
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
-from .services.alphabet_predictor import AlphabetPredictor, Prediction
+from .services.alphabet_predictor import AlphabetPredictor
 from .services.fingerspelling_predictor import FEATURE_DIM, FingerspellingPredictor
+from .services.keras_classifier import Prediction
 from .services.word_predictor import WordPredictor
 
 LOGGER = logging.getLogger(__name__)
@@ -76,11 +77,17 @@ class HealthResponse(BaseModel):
     models: dict[str, ModelHealth]
 
 
+class PredictionItem(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    label: str
+    confidence: float = Field(ge=0, le=1)
+
+
 class PredictionResponse(BaseModel):
     label: str
     confidence: float = Field(ge=0, le=1)
     accepted: bool
-    top_predictions: list[Prediction]
+    top_predictions: list[PredictionItem]
 
 
 class LandmarkRequest(BaseModel):
