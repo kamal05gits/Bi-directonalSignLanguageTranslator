@@ -1,6 +1,6 @@
 """Dictionary-based multilingual translation for recognized ISL text.
 
-SignBridge is a single free-tier web service with no paid translation API
+Signora is a single free-tier web service with no paid translation API
 key, so this module translates with a curated bundled dictionary instead of
 a live network call to a third-party translation service. That keeps it
 deterministic, free, and fully offline-capable - and consistent with the

@@ -169,7 +169,7 @@ def test_sms_body_includes_context_message():
     body = build_sms_body("I need help", "உதவி வேண்டும்", "at the bus stop", "2026-10-05 10:00 UTC")
     assert "I need help" in body
     assert "at the bus stop" in body
-    assert "SignBridge" in body
+    assert "Signora" in body
 
 
 def test_call_twiml_speaks_translated_hindi():

@@ -1,6 +1,6 @@
-# SignBridge — Bidirectional ISL Translator
+# Signora — Bidirectional ISL Translator
 
-SignBridge is a camera-based Indian Sign Language (ISL) translation prototype with **three bundled recognition models, a combined all-three-models ensemble mode, and a continuous live-recognition pipeline**. It recognizes alphabet signs from webcam photos, reads finger positions from your hand skeleton (one shot or streamed continuously into a sentence), classifies short signed-word video clips, merges all three models into one consensus prediction, lets you assemble and edit a message, translates it into Tamil/Hindi, reads it aloud (including in the translated language), raises one-tap emergency phrases delivered by Twilio as an SMS and a synthesized voice call to your own number, and turns typed text into an easy-to-follow fingerspelling sequence.
+Signora is a camera-based Indian Sign Language (ISL) translation prototype with **three bundled recognition models, a combined all-three-models ensemble mode, and a continuous live-recognition pipeline**. It recognizes alphabet signs from webcam photos, reads finger positions from your hand skeleton (one shot or streamed continuously into a sentence), classifies short signed-word video clips, merges all three models into one consensus prediction, lets you assemble and edit a message, translates it into Tamil/Hindi, reads it aloud (including in the translated language), raises one-tap emergency phrases delivered by Twilio as an SMS and a synthesized voice call to your own number, and turns typed text into an easy-to-follow fingerspelling sequence.
 
 ## What works
 
@@ -37,18 +37,18 @@ Confidence + alternatives
 Message builder / speech / fingerspelling sequence ─► /api/emergency/alert ─► Twilio SMS + voice call (when configured)
 ```
 
-The frontend uses relative API URLs, so it works locally and on Render without CORS configuration. Images, landmark vectors, and clips are processed in memory and never written to disk by SignBridge (the word predictor uses a self-deleting temp file purely so OpenCV can decode the clip). If the optional Roboflow provider is enabled, the image is sent to Roboflow's hosted inference service; see the deployment/privacy note below.
+The frontend uses relative API URLs, so it works locally and on Render without CORS configuration. Images, landmark vectors, and clips are processed in memory and never written to disk by Signora (the word predictor uses a self-deleting temp file purely so OpenCV can decode the clip). If the optional Roboflow provider is enabled, the image is sent to Roboflow's hosted inference service; see the deployment/privacy note below.
 
 ## Run locally with Docker
 
 ```bash
 # Lean image: alphabet + fingerspelling models
-docker build -t signbridge .
-docker run --rm -p 10000:10000 signbridge
+docker build -t signora .
+docker run --rm -p 10000:10000 signora
 
 # Full image: all three models, including the CISLR word model
-docker build --build-arg WITH_WORD_MODEL=true -t signbridge:full .
-docker run --rm -p 10000:10000 signbridge:full
+docker build --build-arg WITH_WORD_MODEL=true -t signora:full .
+docker run --rm -p 10000:10000 signora:full
 ```
 
 Open <http://localhost:10000>. Browsers permit camera access on localhost. On a remote host, HTTPS is required; Render supplies HTTPS automatically.
@@ -72,7 +72,7 @@ pip install -r backend/requirements-word.txt \
   --extra-index-url https://download.pytorch.org/whl/cpu
 
 # Optional: download ahead of time. If the checkout still contains the Git LFS
-# pointer, SignBridge downloads and SHA-256-verifies the 57 MB checkpoint on the
+# pointer, Signora downloads and SHA-256-verifies the 57 MB checkpoint on the
 # first word prediction automatically.
 git lfs pull
 ```
@@ -87,7 +87,7 @@ This repository includes `render.yaml` and a production `Dockerfile`.
 
 1. Push the repository to GitHub.
 2. In the [Render dashboard](https://dashboard.render.com/), choose **New → Blueprint**.
-3. Connect this repository and approve the `signbridge-isl-translator` service.
+3. Connect this repository and approve the `signora-isl-translator` service.
 4. Use at least the **Starter** instance. TensorFlow commonly exceeds the memory available on free instances.
 5. Wait for the Docker build and open the generated `onrender.com` URL.
 6. Visit `/api/health`; it should return `status: "ok"` with the alphabet and fingerspelling models `available: true`.
@@ -111,7 +111,7 @@ ROBOFLOW_CONFIDENCE=0.25
 ROBOFLOW_OVERLAP=0.50
 ```
 
-Only `ROBOFLOW_API_KEY` is required because the other values have the same defaults. After saving the secret, redeploy the service and check `GET /api/health`: `providers.roboflow.available` should be `true`, and the alphabet model detail should mention the Roboflow model. The image sent for recognition is forwarded to Roboflow for inference and is not stored by SignBridge; review Roboflow's plan, privacy, and rate limits before using it with real users.
+Only `ROBOFLOW_API_KEY` is required because the other values have the same defaults. After saving the secret, redeploy the service and check `GET /api/health`: `providers.roboflow.available` should be `true`, and the alphabet model detail should mention the Roboflow model. The image sent for recognition is forwarded to Roboflow for inference and is not stored by Signora; review Roboflow's plan, privacy, and rate limits before using it with real users.
 
 For local development, set the key only in your shell or an untracked `.env` mechanism before starting Uvicorn:
 

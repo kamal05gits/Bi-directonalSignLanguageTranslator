@@ -1,6 +1,6 @@
 # Web architecture
 
-SignBridge is deployed as one Dockerized FastAPI service. FastAPI hosts both the static browser client and the prediction API, keeping camera and API traffic on one HTTPS origin.
+Signora is deployed as one Dockerized FastAPI service. FastAPI hosts both the static browser client and the prediction API, keeping camera and API traffic on one HTTPS origin.
 
 ## Recognition flows
 

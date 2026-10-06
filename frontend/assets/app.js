@@ -78,7 +78,7 @@ const MODES = {
     stageTitle: 'Sign continuously',
     guideLabel: 'Keep your whole hand in view',
     captureLabel: 'Start continuous recognition',
-    hint: 'Hold each letter steady; SignBridge builds the sentence automatically. Pause with no hand visible to insert a space.',
+    hint: 'Hold each letter steady; Signora builds the sentence automatically. Pause with no hand visible to insert a space.',
     addLabel: 'Add letter',
     addsWord: false,
     privacy: 'Only landmark coordinates leave your browser, streamed continuously while active — never the video.',
@@ -102,10 +102,10 @@ async function checkApi() {
     modelHealth = data.models || {};
     const roboflowEnabled = Boolean(data.providers && data.providers.roboflow && data.providers.roboflow.available);
     MODES.alphabet.privacy = roboflowEnabled
-      ? 'The image is sent to Roboflow for recognition and is not stored by SignBridge.'
+      ? 'The image is sent to Roboflow for recognition and is not stored by Signora.'
       : 'Images are processed for recognition and are not stored.';
     MODES.combined.privacy = roboflowEnabled
-      ? 'The frame is sent to Roboflow; landmarks and the clip are processed by SignBridge and never stored.'
+      ? 'The frame is sent to Roboflow; landmarks and the clip are processed by Signora and never stored.'
       : 'One frame, its hand landmarks, and the clip are processed together and never stored.';
     els.privacyNote.textContent = MODES[mode].privacy;
     // Continuous mode reuses the fingerspelling model under the hood.

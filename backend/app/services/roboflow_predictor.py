@@ -5,7 +5,7 @@ model version ``indian-sign-language_40/1``.  The API key is deliberately read
 only from the server environment: it must never be sent to the browser or
 committed to the repository.
 
-Roboflow returns object detections rather than one classification.  SignBridge
+Roboflow returns object detections rather than one classification.  Signora
 turns the detections into the same ranked ``Prediction`` shape used by the
 bundled classifiers by sorting by confidence and keeping one result per class.
 That lets the existing UI and message builder use this hosted model without
@@ -141,7 +141,7 @@ def _float_env_or_value(
 
 
 def _predictions_from_response(payload: Any, top_k: int = 5) -> list[Prediction]:
-    """Convert Roboflow's detection JSON into SignBridge predictions."""
+    """Convert Roboflow's detection JSON into Signora predictions."""
     if isinstance(payload, list):
         payload = payload[0] if payload and isinstance(payload[0], dict) else {}
     if not isinstance(payload, dict):

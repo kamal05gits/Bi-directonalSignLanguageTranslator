@@ -150,12 +150,12 @@ def _default_client_factory(config: TwilioConfig):
 
 
 def build_sms_body(phrase_en: str, phrase_translated: str, context: str | None, when: str) -> str:
-    lines = ["SignBridge EMERGENCY ALERT", f'"{phrase_en}"']
+    lines = ["Signora EMERGENCY ALERT", f'"{phrase_en}"']
     if phrase_translated and phrase_translated != phrase_en:
         lines.append(f"({phrase_translated})")
     if context:
         lines.append(f'Sender\'s message: "{context}"')
-    lines.append(f"{when} — SignBridge ISL translator")
+    lines.append(f"{when} — Signora ISL translator")
     return "\n".join(lines)
 
 
@@ -166,7 +166,7 @@ def build_call_twiml(phrase_en: str, phrase_translated: str, language: str) -> s
     parts = [
         "<Response>",
         '<Pause length="1"/>',
-        f"<Say{say_attrs}>This is an emergency alert from SignBridge.</Say>",
+        f"<Say{say_attrs}>This is an emergency alert from Signora.</Say>",
         f"<Say{say_attrs}>{escape(phrase_en)}.</Say>",
     ]
     if phrase_translated and phrase_translated != phrase_en:
