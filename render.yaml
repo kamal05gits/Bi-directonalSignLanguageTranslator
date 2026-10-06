@@ -20,6 +20,18 @@ services:
         value: "0.70"
       - key: PYTHON_VERSION
         value: "3.11.11"
+      # Optional Roboflow-hosted ISL detector. Enter the secret in the Render
+      # dashboard; never commit it here or put it in frontend JavaScript.
+      - key: ROBOFLOW_API_KEY
+        sync: false
+      - key: ROBOFLOW_MODEL_ID
+        value: "indian-sign-language_40/1"
+      - key: ROBOFLOW_API_URL
+        value: "https://serverless.roboflow.com"
+      - key: ROBOFLOW_CONFIDENCE
+        value: "0.25"
+      - key: ROBOFLOW_OVERLAP
+        value: "0.50"
       # Twilio emergency alerts: set these to deliver SMS + voice calls to your
       # own number. Without them, emergency phrases stay on-screen/spoken only.
       - key: TWILIO_ACCOUNT_SID
