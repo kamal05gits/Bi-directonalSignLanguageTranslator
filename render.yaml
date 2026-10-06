@@ -4,7 +4,7 @@
 # plan (TensorFlow + PyTorch need more memory than Starter provides).
 services:
   - type: web
-    name: signbridge-isl-translator
+    name: signora-isl-translator
     runtime: docker
     plan: starter
     dockerfilePath: ./Dockerfile

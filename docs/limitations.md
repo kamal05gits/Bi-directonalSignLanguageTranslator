@@ -1,6 +1,6 @@
 # Limitations
 
-SignBridge is an assistive prototype. These constraints are displayed honestly in the product rather than hidden.
+Signora is an assistive prototype. These constraints are displayed honestly in the product rather than hidden.
 
 ## Alphabet photo model
 

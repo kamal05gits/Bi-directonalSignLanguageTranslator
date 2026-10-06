@@ -91,12 +91,12 @@ jobs:
         with:
           context: .
           load: true
-          tags: signbridge:ci
+          tags: signora:ci
           cache-from: type=gha
           cache-to: type=gha,mode=max
       - name: Boot container
         run: |
-          docker run -d --name signbridge -p 10000:10000 signbridge:ci
+          docker run -d --name signora -p 10000:10000 signora:ci
           for i in $(seq 1 30); do
             if curl -fsS http://localhost:10000/api/health > /dev/null 2>&1; then
               echo "server is up after ${i}s"
@@ -104,7 +104,7 @@ jobs:
             fi
             if [ "$i" = "30" ]; then
               echo "::error::server did not come up within 30s"
-              docker logs signbridge
+              docker logs signora
               exit 1
             fi
             sleep 1
@@ -145,7 +145,7 @@ jobs:
           '
       - name: Container logs
         if: always()
-        run: docker logs signbridge || true
+        run: docker logs signora || true
 
   # ------------------------------------------------------------------ deploy
   # Optional CI-gated deploy: create a Deploy Hook on the Render service

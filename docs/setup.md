@@ -8,7 +8,7 @@ The minimum production environment is Python 3.11 with the packages pinned in `b
 
 The alphabet and fingerspelling models work with the base requirements. The word model (`POST /api/predict/word`) needs three extra pieces:
 
-1. **The I3D checkpoint.** The repository tracks it with Git LFS, so a plain clone can contain only a small pointer file. SignBridge now downloads the real 57 MB file on the first word prediction, verifies its pinned SHA-256, and installs it atomically. You can still restore it ahead of time:
+1. **The I3D checkpoint.** The repository tracks it with Git LFS, so a plain clone can contain only a small pointer file. Signora now downloads the real 57 MB file on the first word prediction, verifies its pinned SHA-256, and installs it atomically. You can still restore it ahead of time:
 
    ```bash
    git lfs pull

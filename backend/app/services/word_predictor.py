@@ -122,7 +122,7 @@ class WordPredictor(LazyKerasClassifier):
             try:
                 request = urllib.request.Request(
                     self.checkpoint_url,
-                    headers={"User-Agent": "SignBridge/2.2 checkpoint downloader"},
+                    headers={"User-Agent": "Signora/2.2 checkpoint downloader"},
                 )
                 with urllib.request.urlopen(request, timeout=120) as response, tempfile.NamedTemporaryFile(
                     dir=self.weights_path.parent, suffix=".download", delete=False

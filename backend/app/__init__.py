@@ -1,1 +1,1 @@
-"""SignBridge web application."""
+"""Signora web application."""

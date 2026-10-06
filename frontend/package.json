@@ -1,8 +1,8 @@
 {
-  "name": "signbridge-web",
+  "name": "signora-web",
   "version": "1.0.0",
   "private": true,
-  "description": "Static web client served by the SignBridge FastAPI application",
+  "description": "Static web client served by the Signora FastAPI application",
   "scripts": {
     "check": "node --check assets/app.js"
   }

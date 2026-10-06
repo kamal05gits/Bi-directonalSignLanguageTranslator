@@ -1,1 +1,1 @@
-"""SignBridge backend package."""
+"""Signora backend package."""
