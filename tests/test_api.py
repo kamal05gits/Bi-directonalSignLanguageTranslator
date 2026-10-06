@@ -109,3 +109,57 @@ def test_word_predict_rejects_non_video(client):
 def test_info_lists_models(client):
     data = client.get("/api/info").json()
     assert set(data["models"]) == {"alphabet", "fingerspelling", "word"}
+
+
+class FramesAwareStub(StubPredictor):
+    """Records which prediction path the endpoint chose."""
+
+    def __init__(self):
+        self.single_calls = 0
+        self.burst_calls = 0
+
+    def predict(self, value, top_k=3):
+        self.single_calls += 1
+        return [Prediction(label="a", confidence=0.9), Prediction(label="b", confidence=0.1)]
+
+    def predict_frames(self, frames, top_k=3):
+        self.burst_calls = len(list(frames))
+        return [Prediction(label="a", confidence=0.9), Prediction(label="b", confidence=0.1)]
+
+
+def test_fingerspelling_predict_accepts_frame_burst(client, monkeypatch):
+    stub = FramesAwareStub()
+    monkeypatch.setattr(main, "fingerspelling_predictor", stub)
+    frames = [[0.001 * i for i in range(126)] for _ in range(3)]
+    response = client.post("/api/predict/fingerspelling", json={"frames": frames})
+    assert response.status_code == 200
+    assert response.json()["label"] == "a"
+    assert stub.burst_calls == 3
+    assert stub.single_calls == 0
+
+
+def test_fingerspelling_predict_requires_some_input(client):
+    response = client.post("/api/predict/fingerspelling", json={})
+    assert response.status_code == 422
+
+
+def test_fingerspelling_predict_rejects_oversized_burst(client):
+    frames = [[0.0] * 126 for _ in range(11)]
+    response = client.post("/api/predict/fingerspelling", json={"frames": frames})
+    assert response.status_code == 422
+
+
+def test_margin_rule_accepts_confident_leader_below_threshold():
+    # 55% is under the 70% threshold, but 11x ahead of the runner-up.
+    results = [Prediction(label="a", confidence=0.55), Prediction(label="b", confidence=0.05)]
+    assert main._is_accepted(results, 0.70) is True
+
+
+def test_margin_rule_rejects_close_race_below_threshold():
+    results = [Prediction(label="a", confidence=0.55), Prediction(label="b", confidence=0.40)]
+    assert main._is_accepted(results, 0.70) is False
+
+
+def test_margin_rule_rejects_weak_leader_even_with_margin():
+    results = [Prediction(label="a", confidence=0.30), Prediction(label="b", confidence=0.02)]
+    assert main._is_accepted(results, 0.70) is False

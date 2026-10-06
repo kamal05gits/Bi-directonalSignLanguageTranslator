@@ -64,3 +64,44 @@ def test_label_stabilizer_accepts_a_different_label_immediately_after_its_own_ho
     second = stabilizer.update("b", 0.9, now=0.1)
     assert first.accepted
     assert second.accepted
+
+
+# ---------------------------------------------------------- DistributionSmoother
+
+
+def test_distribution_smoother_adopts_first_distribution_unchanged():
+    from app.ml.predict import DistributionSmoother
+
+    smoother = DistributionSmoother(alpha=0.45)
+    ranked = smoother.update([("a", 0.95), ("b", 0.02)])
+    assert ranked[0] == ("a", 0.95)
+
+
+def test_distribution_smoother_lets_consistent_runner_up_overtake_a_spike():
+    from app.ml.predict import DistributionSmoother
+
+    smoother = DistributionSmoother(alpha=0.45)
+    # One noisy frame puts "x" on top...
+    smoother.update([("x", 0.60), ("a", 0.40)])
+    # ...but the user is actually holding "a", which keeps winning.
+    smoother.update([("a", 0.55), ("x", 0.30)])
+    ranked = smoother.update([("a", 0.55), ("x", 0.25)])
+    assert ranked[0][0] == "a"
+
+
+def test_distribution_smoother_reset_forgets_history():
+    from app.ml.predict import DistributionSmoother
+
+    smoother = DistributionSmoother(alpha=0.45)
+    smoother.update([("x", 0.90)])
+    smoother.reset()
+    ranked = smoother.update([("a", 0.80)])
+    assert ranked[0] == ("a", 0.80)
+
+
+def test_distribution_smoother_rejects_bad_alpha():
+    import pytest
+    from app.ml.predict import DistributionSmoother
+
+    with pytest.raises(ValueError):
+        DistributionSmoother(alpha=0.0)

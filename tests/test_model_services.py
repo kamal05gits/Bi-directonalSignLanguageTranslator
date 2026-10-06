@@ -202,3 +202,117 @@ def test_sample_frames_rejects_an_unreadable_video(tmp_path, monkeypatch):
     _fake_cv2(monkeypatch, total=0)
     with pytest.raises(ValueError, match="Could not decode"):
         WordPredictor._sample_frames(tmp_path / "clip.webm")
+
+
+class _FakePerFrameModel:
+    """Returns a scripted distribution per input row, supporting batches."""
+
+    def __init__(self, rows):
+        self.rows = np.asarray(rows, dtype=np.float32)
+
+    def predict(self, batch, verbose=0):
+        return self.rows[: len(batch)]
+
+
+def test_fingerspelling_predict_frames_soft_votes_across_samples(tmp_path, monkeypatch):
+    predictor = _fingerspelling(tmp_path)
+    # Frame 1 spikes on "b", frames 2-3 consistently favour "a": the average
+    # must rank "a" first even though one frame disagreed.
+    monkeypatch.setattr(
+        predictor, "_load", lambda: _FakePerFrameModel([[0.1, 0.9], [0.8, 0.2], [0.8, 0.2]])
+    )
+    frames = [[0.1] * FEATURE_DIM, [0.2] * FEATURE_DIM, [0.3] * FEATURE_DIM]
+    result = predictor.predict_frames(frames, top_k=2)
+    assert result[0].label == "a"
+    assert result[0].confidence == pytest.approx((0.1 + 0.8 + 0.8) / 3)
+
+
+def test_fingerspelling_predict_frames_drops_empty_frames(tmp_path, monkeypatch):
+    predictor = _fingerspelling(tmp_path)
+    monkeypatch.setattr(predictor, "_load", lambda: _FakePerFrameModel([[0.2, 0.8]]))
+    frames = [[0.0] * FEATURE_DIM, [0.1] * FEATURE_DIM]
+    result = predictor.predict_frames(frames, top_k=2)
+    assert result[0].label == "b"
+
+
+def test_fingerspelling_predict_frames_rejects_all_empty(tmp_path):
+    predictor = _fingerspelling(tmp_path)
+    with pytest.raises(ValueError, match="No hand"):
+        predictor.predict_frames([[0.0] * FEATURE_DIM, [0.0] * FEATURE_DIM])
+
+
+# ------------------------------------------------------- calibration & mirror
+
+
+def test_calibration_softens_saturated_distributions(tmp_path, monkeypatch):
+    predictor = FingerspellingPredictor(
+        tmp_path / "model.keras", _write_labels(tmp_path), temperature=2.0
+    )
+    monkeypatch.setattr(predictor, "_load", lambda: _FakePerFrameModel([[0.9, 0.1]]))
+    result = predictor.predict([0.1] * FEATURE_DIM, top_k=2)
+    # p^(1/2) renormalized: 0.9487 / (0.9487 + 0.3162) = 0.75
+    assert result[0].label == "a"
+    assert result[0].confidence == pytest.approx(0.75, abs=1e-3)
+    assert result[1].confidence == pytest.approx(0.25, abs=1e-3)
+
+
+def test_temperature_one_leaves_distribution_unchanged(tmp_path, monkeypatch):
+    predictor = _fingerspelling(tmp_path)
+    monkeypatch.setattr(predictor, "_load", lambda: _FakePerFrameModel([[0.9, 0.1]]))
+    result = predictor.predict([0.1] * FEATURE_DIM, top_k=2)
+    assert result[0].confidence == pytest.approx(0.9)
+
+
+def test_invalid_temperature_is_rejected(tmp_path):
+    with pytest.raises(ValueError, match="temperature"):
+        FingerspellingPredictor(tmp_path / "model.keras", _write_labels(tmp_path), temperature=0)
+
+
+def test_mirror_hands_swaps_slots_and_negates_x():
+    from app.services.fingerspelling_predictor import HAND_DIM, mirror_hands
+
+    vector = np.zeros(FEATURE_DIM, dtype=np.float32)
+    vector[0:3] = [0.5, 0.25, -0.125]  # left-hand point (x, y, z)
+    mirrored = mirror_hands(vector)
+    assert mirrored[HAND_DIM:HAND_DIM + 3] == pytest.approx([-0.5, 0.25, -0.125])
+    assert not mirrored[:HAND_DIM].any()
+
+
+class _SlotSensitiveModel:
+    """Scores rows with a populated right-hand slot far higher than left-only rows."""
+
+    def predict(self, batch, verbose=0):
+        rows = []
+        for row in batch:
+            rows.append([0.05, 0.95] if np.any(row[63:]) else [0.6, 0.4])
+        return np.asarray(rows, dtype=np.float32)
+
+
+def test_mirror_tta_rescues_wrong_slot_hand(tmp_path, monkeypatch):
+    predictor = FingerspellingPredictor(
+        tmp_path / "model.keras", _write_labels(tmp_path), mirror_tta=True
+    )
+    monkeypatch.setattr(predictor, "_load", lambda: _SlotSensitiveModel())
+    vector = [0.0] * FEATURE_DIM
+    vector[0] = 0.3  # hand landed in the slot the model was never trained on
+    result = predictor.predict(vector, top_k=2)
+    assert result[0].label == "b"
+    assert result[0].confidence == pytest.approx(0.95)
+
+
+def test_mirror_tta_keeps_original_when_not_clearly_better(tmp_path, monkeypatch):
+    predictor = FingerspellingPredictor(
+        tmp_path / "model.keras", _write_labels(tmp_path), mirror_tta=True, mirror_margin=1.25
+    )
+
+    class _NearTie:
+        def predict(self, batch, verbose=0):
+            # Mirrored rows score slightly higher, but inside the margin.
+            rows = [[0.7, 0.3] if not np.any(row[63:]) else [0.25, 0.75] for row in batch]
+            return np.asarray(rows, dtype=np.float32)
+
+    monkeypatch.setattr(predictor, "_load", lambda: _NearTie())
+    vector = [0.0] * FEATURE_DIM
+    vector[0] = 0.3
+    result = predictor.predict(vector, top_k=2)
+    assert result[0].label == "a"  # 0.75 < 0.7 * 1.25, so the original stands

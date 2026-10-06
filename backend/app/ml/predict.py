@@ -27,6 +27,47 @@ class PredictionEngine:
         return PredictionResult(label, confidence, accepted, reason)
 
 
+class DistributionSmoother:
+    """Exponential moving average over full ranked prediction distributions.
+
+    The per-frame classifier only has to be wrong for a single frame for the
+    correct label to drop into the low-confidence suggestions. Smoothing the
+    *whole* probability distribution over time (instead of only looking at
+    each frame's argmax) lets a label that is consistently second place at,
+    say, 40% overtake a label that spiked once at 60% — so the stabilized
+    top-1 tracks what the user is actually holding, not one noisy frame.
+
+    ``update`` takes ``(label, confidence)`` pairs (any iterable) and returns
+    the smoothed ranking as a list of ``(label, confidence)`` tuples, best
+    first. The first update after a ``reset`` adopts the incoming
+    distribution as-is so a fresh sign is never diluted by a cold start.
+    """
+
+    def __init__(self, alpha: float = 0.45) -> None:
+        if not 0.0 < alpha <= 1.0:
+            raise ValueError("alpha must be in (0, 1].")
+        self.alpha = alpha
+        self._scores: dict[str, float] = {}
+
+    def update(self, ranked) -> list[tuple[str, float]]:
+        current = {str(label): float(confidence) for label, confidence in ranked}
+        if not self._scores:
+            self._scores = dict(current)
+        else:
+            labels = set(self._scores) | set(current)
+            self._scores = {
+                label: (1.0 - self.alpha) * self._scores.get(label, 0.0) + self.alpha * current.get(label, 0.0)
+                for label in labels
+            }
+            # Drop labels whose evidence has decayed to noise so the state
+            # cannot grow without bound during a long session.
+            self._scores = {label: score for label, score in self._scores.items() if score >= 1e-4}
+        return sorted(self._scores.items(), key=lambda item: item[1], reverse=True)
+
+    def reset(self) -> None:
+        self._scores = {}
+
+
 @dataclass
 class StabilizedPrediction:
     label: str | None
