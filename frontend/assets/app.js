@@ -1,5 +1,5 @@
 const $ = (id) => document.getElementById(id);
-const els = Object.fromEntries(['apiStatus','video','canvas','landmarkOverlay','cameraEmpty','cameraButton','pauseButton','captureButton','flipButton','stageTitle','guideLabel','privacyNote','predictionEmpty','predictionResult','predictionHint','letter','confidence','confidenceMeter','predictionState','modelChips','addButton','alternatives','message','characterCount','clearButton','spaceButton','periodButton','backspaceButton','speakButton','replayButton','stopSpeechButton','muteToggle','fingerSequence','toast','countdown','pausedOverlay','languageSelect','translateButton','speakTranslatedButton','translationOutput','emergencyButton','emergencyPanel','emergencyClose','emergencyNote','emergencyStatus','emergencyPhrases','emergencyBanner'].map(id => [id, $(id)]));
+const els = Object.fromEntries(['apiStatus','video','canvas','landmarkOverlay','cameraEmpty','cameraButton','pauseButton','captureButton','flipButton','stageTitle','guideLabel','privacyNote','predictionEmpty','predictionResult','predictionHint','letter','confidence','confidenceMeter','predictionState','modelChips','addButton','alternatives','message','characterCount','clearButton','spaceButton','periodButton','backspaceButton','speakButton','replayButton','stopSpeechButton','muteToggle','fingerSequence','fingerNote','toast','countdown','pausedOverlay','languageSelect','translateButton','speakTranslatedButton','translationOutput','emergencyButton','emergencyPanel','emergencyClose','emergencyNote','emergencyStatus','emergencyPhrases','emergencyBanner'].map(id => [id, $(id)]));
 const modeButtons = [...document.querySelectorAll('.model-option')];
 const modelDots = Object.fromEntries([...document.querySelectorAll('[data-model-dot]')].map(dot => [dot.dataset.modelDot, dot]));
 
@@ -647,20 +647,43 @@ function addToMessage() {
   toast(`Added ${currentLabel}`);
 }
 
+// Renders the typed message as an ordered fingerspelling sequence. Both
+// bundled letter models only cover a-z, so anything else (digits, accents,
+// punctuation) is shown as an explicit "cannot be fingerspelled" tile and
+// summarised below, instead of being dropped without telling the user.
 function updateMessage() {
   els.characterCount.textContent = `${els.message.value.length} / 240`;
   els.fingerSequence.innerHTML = '';
+  els.fingerNote.textContent = '';
   if (!els.message.value) {
     els.fingerSequence.innerHTML = '<span class="sequence-empty">Your sequence will appear here</span>';
     return;
   }
+  const unspellable = [];
   [...els.message.value.toLowerCase()].forEach(character => {
     const tile = document.createElement('span');
-    if (/[a-z]/.test(character)) { tile.className = 'finger-letter'; tile.textContent = character; tile.title = `Sign the letter ${character.toUpperCase()}`; }
-    else if (character === ' ') { tile.className = 'finger-space'; tile.title = 'Space'; }
-    else return;
+    tile.setAttribute('role', 'listitem');
+    if (/[a-z]/.test(character)) {
+      tile.className = 'finger-letter';
+      tile.textContent = character;
+      tile.title = `Sign the letter ${character.toUpperCase()}`;
+      tile.setAttribute('aria-label', `Letter ${character.toUpperCase()}`);
+    } else if (/\s/.test(character)) {
+      tile.className = 'finger-space';
+      tile.title = 'Space';
+      tile.setAttribute('aria-label', 'Space');
+    } else {
+      tile.className = 'finger-unknown';
+      tile.textContent = character;
+      tile.title = `"${character}" has no letter sign in this alphabet — say or write it instead`;
+      tile.setAttribute('aria-label', `${character}, no letter sign`);
+      if (!unspellable.includes(character)) unspellable.push(character);
+    }
     els.fingerSequence.appendChild(tile);
   });
+  if (unspellable.length) {
+    els.fingerNote.textContent = `No letter sign for ${unspellable.map(character => `"${character}"`).join(', ')} — these use number or non-manual signs, so say or write them instead.`;
+  }
 }
 
 // --- Translation (Multilingual Output module) -----------------------------
@@ -850,5 +873,9 @@ els.emergencyPanel.addEventListener('click', event => { if (event.target === els
 window.addEventListener('beforeunload', stopCamera);
 setMode('combined');
 checkApi();
+// Model availability can change after boot (lazy loads, a restarted deploy),
+// so keep the status dots and mode warnings fresh instead of trusting the
+// single health call made at page load.
+setInterval(checkApi, 30000);
 updateMessage();
 loadLanguages();

@@ -2,7 +2,7 @@
 
 The pipeline mirrors ``backend/final_demo_inference.py``:
 
-1. Decode the uploaded video and resample it to 90 frames.
+1. Decode only the 90 sampled frames of the uploaded video (bounded memory).
 2. Resize each frame so the shorter side is 224 px, then center-crop to 224x224.
 3. Extract 1024-d features with the I3D network (WLASL asl2000 checkpoint).
 4. Resample the feature sequence to (32, 1024) and normalize with the
@@ -144,29 +144,84 @@ class WordPredictor(LazyKerasClassifier):
     # ---------------------------------------------------------------- pipeline
 
     @staticmethod
-    def _decode_frames(video_path: Path) -> list[np.ndarray]:
+    def _import_cv2():
         try:
             import cv2
         except ImportError as exc:
             raise RuntimeError(f"OpenCV is required for the word model. {DEPENDENCY_HINT}") from exc
+        return cv2
+
+    @classmethod
+    def _open_capture(cls, cv2, video_path: Path):
         capture = cv2.VideoCapture(str(video_path))
         if not capture.isOpened():
             raise ValueError("Could not decode the uploaded video. Try WebM or MP4.")
-        frames: list[np.ndarray] = []
-        while True:
-            ok, frame = capture.read()
-            if not ok:
-                break
-            frames.append(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
-        capture.release()
-        if not frames:
+        return capture
+
+    @classmethod
+    def _count_frames(cls, cv2, video_path: Path) -> int:
+        """Count decodable frames without keeping any of them in memory.
+
+        ``grab()`` advances the decoder without copying/converting the frame,
+        and the container metadata (``CAP_PROP_FRAME_COUNT``) is unreliable for
+        browser-recorded WebM, so it is only used as a sanity hint.
+        """
+        capture = cls._open_capture(cv2, video_path)
+        try:
+            total = 0
+            while capture.grab():
+                total += 1
+        finally:
+            capture.release()
+        return total
+
+    @classmethod
+    def _sample_frames(cls, video_path: Path) -> np.ndarray:
+        """Return ``NUM_INPUT_FRAMES`` preprocessed frames as (T, 224, 224, 3).
+
+        Only the sampled frames are ever decoded into memory (~54 MB at
+        224x224 float32), instead of holding the whole clip as full-resolution
+        RGB arrays, which can reach several GB for a long 1080p upload.
+        The sampling positions are identical to decoding everything first and
+        indexing with ``np.linspace(0, total - 1, NUM_INPUT_FRAMES)``.
+        """
+        cv2 = cls._import_cv2()
+        total = cls._count_frames(cv2, video_path)
+        if total == 0:
             raise ValueError("The uploaded video contains no readable frames.")
-        return frames
 
-    @staticmethod
-    def _preprocess_frame(frame: np.ndarray) -> np.ndarray:
-        import cv2
+        indices = np.linspace(0, total - 1, NUM_INPUT_FRAMES).astype(np.int32)
+        wanted = sorted(set(int(index) for index in indices))
 
+        decoded: dict[int, np.ndarray] = {}
+        capture = cls._open_capture(cv2, video_path)
+        try:
+            position = 0
+            for index in wanted:
+                while position < index and capture.grab():
+                    position += 1
+                ok, frame = capture.read()
+                if not ok:
+                    break  # Second pass ended early; fall back to what we have.
+                position += 1
+                decoded[index] = cls._preprocess_frame(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+        finally:
+            capture.release()
+
+        if not decoded:
+            raise ValueError("The uploaded video contains no readable frames.")
+
+        available = sorted(decoded)
+        sampled = [
+            decoded[int(index)] if int(index) in decoded
+            else decoded[min(available, key=lambda kept: abs(kept - int(index)))]
+            for index in indices
+        ]
+        return np.stack(sampled)
+
+    @classmethod
+    def _preprocess_frame(cls, frame: np.ndarray) -> np.ndarray:
+        cv2 = cls._import_cv2()
         height, width = frame.shape[:2]
         scale = IMAGE_SIZE / min(height, width)
         new_w, new_h = int(round(width * scale)), int(round(height * scale))
@@ -176,11 +231,12 @@ class WordPredictor(LazyKerasClassifier):
         cropped = cv2.resize(cropped, (IMAGE_SIZE, IMAGE_SIZE), interpolation=cv2.INTER_LINEAR)
         return cropped.astype(np.float32) / 127.5 - 1.0
 
-    def _extract_features(self, frames: list[np.ndarray]) -> np.ndarray:
+    def _extract_features(self, sampled: np.ndarray) -> np.ndarray:
+        """Run the I3D feature extractor over (NUM_INPUT_FRAMES, 224, 224, 3) input."""
         import torch
 
-        indices = np.linspace(0, len(frames) - 1, NUM_INPUT_FRAMES).astype(np.int32)
-        sampled = np.stack([self._preprocess_frame(frames[i]) for i in indices])
+        if sampled.shape[0] != NUM_INPUT_FRAMES:
+            raise RuntimeError(f"Expected {NUM_INPUT_FRAMES} preprocessed frames, got {sampled.shape[0]}.")
         # T,H,W,C -> B,C,T,H,W
         tensor = torch.from_numpy(np.transpose(sampled, (3, 0, 1, 2))).unsqueeze(0).float()
 
@@ -210,8 +266,7 @@ class WordPredictor(LazyKerasClassifier):
             with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as handle:
                 handle.write(payload)
                 temp_path = Path(handle.name)
-            frames = self._decode_frames(temp_path)
-            features = self._extract_features(frames)
+            features = self._extract_features(self._sample_frames(temp_path))
             mean, std = self._load_normalization()
             normalized = np.nan_to_num((features - mean) / std, nan=0.0, posinf=0.0, neginf=0.0)
             return self._predict_array(normalized[np.newaxis, ...].astype(np.float32), top_k)

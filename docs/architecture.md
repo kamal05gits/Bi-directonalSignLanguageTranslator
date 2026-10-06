@@ -53,7 +53,7 @@ Four previously standalone, unit-tested-only components (`app.features.sequence_
 
 - **Sign to text (one shot):** camera → one of the three models → letter or word → editable message → browser speech synthesis.
 - **Sign to text (continuous):** camera → streamed landmarks → `/api/continuous` session (buffer + stabilizer + sentence builder) → live-updating editable message.
-- **Text to sign guidance:** typed message → ordered alphabet tiles. This is a fingerspelling sequence, not generated sign-language video.
+- **Text to sign guidance:** typed message → ordered alphabet tiles. This is a fingerspelling sequence, not generated sign-language video. Both letter models cover a–z only, so digits, punctuation, and accented characters are rendered as explicit "no letter sign" tiles and listed under the sequence rather than silently skipped.
 - **Text to another language:** typed/recognized message → `/api/translate` → original + translated text → speech synthesis in the matching language/voice when available.
 
 ## Deployment boundary

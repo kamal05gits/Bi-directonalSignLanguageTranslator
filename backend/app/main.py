@@ -228,6 +228,12 @@ def predict_fingerspelling(payload: LandmarkRequest) -> PredictionResponse:
 async def predict_word(file: Annotated[UploadFile, File(description="Short WebM/MP4 clip of one signed word")]) -> PredictionResponse:
     if file.content_type not in VIDEO_CONTENT_TYPES:
         raise HTTPException(415, "Please upload a WebM, MP4, MOV, or AVI video clip.")
+    # Check deployment state up front so a missing checkpoint or optional
+    # dependency returns the same actionable message as /api/health instead of
+    # whichever import happens to fail first deep inside the pipeline.
+    word_available, word_detail = word_predictor.availability()
+    if not word_available:
+        raise HTTPException(503, f"Word model is unavailable: {word_detail}")
     payload = await _read_upload(file, MAX_VIDEO_BYTES, "Video exceeds the 32 MB upload limit.")
     if not payload:
         raise HTTPException(400, "The uploaded video is empty.")

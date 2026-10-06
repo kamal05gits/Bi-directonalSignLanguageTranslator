@@ -58,3 +58,8 @@
 .emergency-status{margin:10px 0 0;border-radius:10px;padding:9px 11px;font:600 12px 'DM Sans';border:1px solid var(--line);background:#f6f8f4;color:var(--muted)}
 .emergency-status.ok{background:#f0f7ea;border-color:#d8eccf;color:#2f5540}
 .emergency-status.warn{background:#fdf8e7;border-color:#f3e3b3;color:#8a6d1f}
+
+/* --- Text to fingerspelling: characters with no a-z handshape --- */
+.finger-unknown{flex:0 0 54px;height:62px;border-radius:13px;background:#f6f4ec;display:grid;place-items:center;font:700 22px Manrope;color:#9aa096;border:1px dashed #d3d6cd}
+.finger-note{color:var(--muted);font-size:12px;margin:4px 0 0}
+.finger-note:empty{display:none}
