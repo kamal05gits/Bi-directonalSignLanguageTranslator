@@ -1,6 +1,5 @@
 import numpy as np
 import pytest
-
 from app.features.normalization import FeatureScaler
 from app.features.sequence_buffer import SequenceBuffer
 

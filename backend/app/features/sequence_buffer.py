@@ -1,5 +1,7 @@
 from collections import deque
+
 import numpy as np
+
 
 class SequenceBuffer:
     def __init__(self, length: int, feature_dim: int):

@@ -1,6 +1,8 @@
-from dataclasses import dataclass
 import time
+from dataclasses import dataclass
+
 import numpy as np
+
 
 @dataclass
 class PredictionResult:

@@ -1,0 +1,16 @@
+# Lint policy: correctness rules only (undefined names, unused imports/variables,
+# import hygiene) — no line-length or statement-style nitpicks, matching the
+# existing code style. Vendored third-party code is excluded.
+target-version = "py311"
+
+# Vendored WLASL/I3D implementation and the standalone demo script keep their
+# upstream style; they are not part of the deployed app.
+exclude = [
+    "backend/i3d",
+    "backend/final_demo_inference.py",
+]
+
+[lint]
+# E4/E9: import & syntax errors, F: pyflakes (unused imports/vars, undefined
+# names), I: deterministic import ordering.
+select = ["E4", "E9", "F", "I"]

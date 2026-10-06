@@ -1,5 +1,4 @@
 import numpy as np
-
 from app.data.import_fingerspelling import normalize_letter_label, resample_sequence
 
 

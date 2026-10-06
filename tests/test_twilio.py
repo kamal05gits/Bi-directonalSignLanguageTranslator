@@ -12,8 +12,6 @@ import pytest
 
 pytest.importorskip("fastapi")
 pytest.importorskip("httpx")
-from fastapi.testclient import TestClient  # noqa: E402
-
 from app.main import app  # noqa: E402
 from app.routes import emergency as emergency_routes  # noqa: E402
 from app.services.twilio_notifier import (  # noqa: E402
@@ -23,6 +21,7 @@ from app.services.twilio_notifier import (  # noqa: E402
     build_sms_body,
     mask_number,
 )
+from fastapi.testclient import TestClient  # noqa: E402
 
 
 class FakeTwilioEndpoint:

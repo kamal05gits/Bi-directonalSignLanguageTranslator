@@ -1,5 +1,4 @@
 import numpy as np
-
 from app.vision.hand_detector import HandDetectionResult
 from app.vision.landmarks import FEATURE_DIM, extract_landmark_features
 

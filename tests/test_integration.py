@@ -1,5 +1,4 @@
 import numpy as np
-
 from app.features.extraction import extract_frame_features
 from app.features.sequence_buffer import SequenceBuffer
 from app.ml.predict import PredictionEngine

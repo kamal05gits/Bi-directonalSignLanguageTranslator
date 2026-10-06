@@ -9,6 +9,11 @@ services:
     plan: starter
     dockerfilePath: ./Dockerfile
     healthCheckPath: /api/health
+    # autoDeploy: true deploys every push to main immediately. To gate deploys
+    # on CI instead (lint + tests + Docker smoke test must pass first), set
+    # this to false, create a Deploy Hook on the service (Settings -> Deploy
+    # Hook), and save its URL as the GitHub secret RENDER_DEPLOY_HOOK_URL.
+    # The `deploy` job in .github/workflows/ci.yml does the rest.
     autoDeploy: true
     envVars:
       - key: CONFIDENCE_THRESHOLD

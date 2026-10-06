@@ -2,6 +2,7 @@ import csv
 from dataclasses import dataclass
 from pathlib import Path
 
+
 @dataclass
 class VideoRecord:
     video: str

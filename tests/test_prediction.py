@@ -1,5 +1,4 @@
 import numpy as np
-
 from app.ml.predict import LabelStabilizer, PredictionEngine
 
 

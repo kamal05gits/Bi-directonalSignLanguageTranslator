@@ -1,5 +1,6 @@
 import numpy as np
 
+
 def normalize_letter_label(label: str) -> str:
     if label == " ": return "space"
     if label == ".": return "period"

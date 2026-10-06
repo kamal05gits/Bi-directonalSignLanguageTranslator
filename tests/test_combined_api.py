@@ -9,12 +9,11 @@ import pytest
 
 pytest.importorskip("fastapi")
 pytest.importorskip("httpx")
-from fastapi.testclient import TestClient  # noqa: E402
-
 import app.main as main  # noqa: E402
 from app.main import app  # noqa: E402
 from app.services.fingerspelling_predictor import FEATURE_DIM  # noqa: E402
 from app.services.keras_classifier import Prediction  # noqa: E402
+from fastapi.testclient import TestClient  # noqa: E402
 
 
 class StubLetterPredictor:

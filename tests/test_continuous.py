@@ -11,11 +11,10 @@ import pytest
 
 pytest.importorskip("fastapi")
 pytest.importorskip("httpx")
-from fastapi.testclient import TestClient  # noqa: E402
-
 from app.main import app  # noqa: E402
 from app.routes import continuous  # noqa: E402
 from app.services.keras_classifier import Prediction  # noqa: E402
+from fastapi.testclient import TestClient  # noqa: E402
 
 FEATURE_DIM = 126
 
