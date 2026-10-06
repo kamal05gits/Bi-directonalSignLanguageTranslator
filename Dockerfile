@@ -3,7 +3,7 @@ FROM python:3.11-slim
 # Build with --build-arg WITH_WORD_MODEL=true to include the CISLR word model
 # (PyTorch + OpenCV + the 57 MB I3D checkpoint). The default lean image serves
 # the alphabet photo model and the hand-landmark fingerspelling model.
-ARG WITH_WORD_MODEL=false
+ARG WITH_WORD_MODEL=true
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
