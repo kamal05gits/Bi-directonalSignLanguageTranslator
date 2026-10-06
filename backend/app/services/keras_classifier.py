@@ -24,6 +24,11 @@ def read_labels(labels_path: Path, name: str) -> list[str]:
     labels = json.loads(labels_path.read_text(encoding="utf-8"))
     if not isinstance(labels, list) or not all(isinstance(item, str) for item in labels):
         raise ValueError(f"{name} labels must be a JSON string array.")
+    labels = [item.strip() for item in labels]
+    if any(not item for item in labels):
+        raise ValueError(f"{name} labels must not contain empty values.")
+    if len(set(labels)) != len(labels):
+        raise ValueError(f"{name} labels must be unique and in model-output order.")
     return labels
 
 
@@ -82,7 +87,14 @@ class LazyKerasClassifier:
                 try:
                     import tensorflow as tf
 
-                    self._model = tf.keras.models.load_model(self.model_path, compile=False)
+                    model = tf.keras.models.load_model(self.model_path, compile=False)
+                    output_shape = getattr(model, "output_shape", None)
+                    output_size = output_shape[-1] if output_shape and not isinstance(output_shape, dict) else None
+                    if output_size is not None and int(output_size) != len(self.labels):
+                        raise ValueError(
+                            f"model has {output_size} outputs but the labels file has {len(self.labels)} values"
+                        )
+                    self._model = model
                 except Exception as exc:  # TensorFlow emits several loader exception types.
                     raise RuntimeError(f"Could not load the {self.name} model: {exc}") from exc
         return self._model
@@ -90,8 +102,26 @@ class LazyKerasClassifier:
     def _rank(self, probabilities: np.ndarray, top_k: int) -> list[Prediction]:
         probabilities = np.asarray(probabilities, dtype=np.float32).reshape(-1)
         if probabilities.size != len(self.labels):
-            raise RuntimeError(f"{self.name.capitalize()} model output does not match the configured labels.")
-        indices = np.argsort(probabilities)[::-1][: max(1, top_k)]
+            raise RuntimeError(
+                f"{self.name.capitalize()} model returned {probabilities.size} values but "
+                f"{len(self.labels)} labels are configured. Refusing to attach incorrect labels."
+            )
+        if not np.isfinite(probabilities).all():
+            raise RuntimeError(f"{self.name.capitalize()} model returned non-finite prediction values.")
+        # Every bundled model ends in softmax.  Validate that contract instead
+        # of clipping malformed/logit output into plausible-looking confidence
+        # values and potentially reporting an incorrect result.
+        if np.any(probabilities < -1e-6) or np.any(probabilities > 1.0 + 1e-6):
+            raise RuntimeError(f"{self.name.capitalize()} model output is not a probability distribution.")
+        total = float(probabilities.sum())
+        if total <= 0 or not np.isclose(total, 1.0, rtol=1e-3, atol=1e-4):
+            raise RuntimeError(
+                f"{self.name.capitalize()} model probabilities sum to {total:.6g}, not 1."
+            )
+        # Normalize tiny float32 drift so returned values are always a proper
+        # distribution and are directly comparable across models.
+        probabilities = probabilities / total
+        indices = np.argsort(probabilities)[::-1][: max(1, min(top_k, len(self.labels)))]
         return [
             Prediction(label=self.labels[int(index)], confidence=float(np.clip(probabilities[index], 0, 1)))
             for index in indices

@@ -17,11 +17,15 @@ import time, so the rest of the service keeps working without them.
 
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import logging
+import os
 import sys
 import tempfile
 import threading
+import urllib.error
+import urllib.request
 from pathlib import Path
 from typing import Any
 
@@ -38,6 +42,8 @@ I3D_FEATURE_DIM = 1024
 I3D_NUM_CLASSES = 2000
 LFS_POINTER_PREFIX = b"version https://git-lfs.github.com/spec/"
 DEPENDENCY_HINT = "Install the optional dependencies with: pip install -r backend/requirements-word.txt"
+DEFAULT_CHECKPOINT_SHA256 = "243a19e6deef3becffbfc5b7dd8adb32916c8bee482565ca243c082584732620"
+MAX_CHECKPOINT_BYTES = 100 * 1024 * 1024
 
 
 def is_lfs_pointer(path: Path) -> bool:
@@ -61,11 +67,15 @@ class WordPredictor(LazyKerasClassifier):
         normalization_path,
         weights_path,
         i3d_code_dir,
+        checkpoint_url: str | None = None,
+        checkpoint_sha256: str = DEFAULT_CHECKPOINT_SHA256,
     ) -> None:
         super().__init__(model_path, labels_path)
         self.normalization_path = Path(normalization_path)
         self.weights_path = Path(weights_path)
         self.i3d_code_dir = Path(i3d_code_dir)
+        self.checkpoint_url = checkpoint_url
+        self.checkpoint_sha256 = checkpoint_sha256.lower()
         self._i3d: Any = None
         self._mean: np.ndarray | None = None
         self._std: np.ndarray | None = None
@@ -81,13 +91,67 @@ class WordPredictor(LazyKerasClassifier):
             return False, "Word labels (CISLR_LABELS.json) are missing."
         if not self.normalization_path.is_file():
             return False, "Word normalization stats (CISLR_NORMALIZATION.npz) are missing."
-        if not self.weights_path.is_file():
-            return False, "I3D checkpoint is missing. Restore it with: git lfs pull"
-        if is_lfs_pointer(self.weights_path):
-            return False, "I3D checkpoint is still a Git LFS pointer. Download the real file with: git lfs pull"
+        checkpoint_missing = not self.weights_path.is_file() or is_lfs_pointer(self.weights_path)
+        if checkpoint_missing and not self.checkpoint_url:
+            return False, "I3D checkpoint is missing or still a Git LFS pointer. Restore it with: git lfs pull"
         if importlib.util.find_spec("torch") is None or importlib.util.find_spec("cv2") is None:
             return False, f"PyTorch/OpenCV are not installed. {DEPENDENCY_HINT}"
+        if checkpoint_missing:
+            return True, "ready (the I3D checkpoint will be downloaded securely on the first prediction)"
         return True, "ready"
+
+    def _ensure_checkpoint(self) -> None:
+        """Materialize and verify the LFS checkpoint when configured to do so.
+
+        Source checkouts commonly contain only Git LFS's 133-byte pointer,
+        which previously made the Word tab permanently unavailable even when
+        all Python dependencies were installed.  The production image still
+        downloads at build time, while local/source deployments can now fetch
+        the same file lazily.  A size cap, pinned SHA-256, temporary file and
+        atomic replace prevent partial or unexpected files being loaded.
+        """
+        if self.weights_path.is_file() and not is_lfs_pointer(self.weights_path):
+            return
+        if not self.checkpoint_url:
+            raise RuntimeError("I3D checkpoint is missing. Restore it with: git lfs pull")
+        with self._i3d_lock:
+            if self.weights_path.is_file() and not is_lfs_pointer(self.weights_path):
+                return
+            self.weights_path.parent.mkdir(parents=True, exist_ok=True)
+            temp_path: Path | None = None
+            try:
+                request = urllib.request.Request(
+                    self.checkpoint_url,
+                    headers={"User-Agent": "SignBridge/2.2 checkpoint downloader"},
+                )
+                with urllib.request.urlopen(request, timeout=120) as response, tempfile.NamedTemporaryFile(
+                    dir=self.weights_path.parent, suffix=".download", delete=False
+                ) as output:
+                    temp_path = Path(output.name)
+                    digest = hashlib.sha256()
+                    total = 0
+                    while chunk := response.read(1024 * 1024):
+                        total += len(chunk)
+                        if total > MAX_CHECKPOINT_BYTES:
+                            raise RuntimeError("I3D checkpoint download exceeded the 100 MB safety limit.")
+                        digest.update(chunk)
+                        output.write(chunk)
+                if total == 0:
+                    raise RuntimeError("I3D checkpoint download was empty.")
+                actual = digest.hexdigest()
+                if self.checkpoint_sha256 and actual != self.checkpoint_sha256:
+                    raise RuntimeError(
+                        "I3D checkpoint checksum mismatch; the downloaded file was discarded "
+                        f"(expected {self.checkpoint_sha256}, got {actual})."
+                    )
+                os.replace(temp_path, self.weights_path)
+                temp_path = None
+                LOGGER.info("Downloaded and verified I3D checkpoint (%d bytes)", total)
+            except (OSError, urllib.error.URLError) as exc:
+                raise RuntimeError(f"Could not download the I3D checkpoint: {exc}") from exc
+            finally:
+                if temp_path is not None:
+                    temp_path.unlink(missing_ok=True)
 
     # --------------------------------------------------------------- lazy loads
 
@@ -261,6 +325,9 @@ class WordPredictor(LazyKerasClassifier):
 
     def predict_video(self, payload: bytes, suffix: str, top_k: int = 5) -> list[Prediction]:
         """Classify an uploaded video clip into ranked CISLR word labels."""
+        # Do this before decoding the user's clip so a deployment with an LFS
+        # pointer becomes usable automatically and fails without wasted work.
+        self._ensure_checkpoint()
         temp_path: Path | None = None
         try:
             with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as handle:

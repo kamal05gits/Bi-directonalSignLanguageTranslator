@@ -8,13 +8,13 @@ The minimum production environment is Python 3.11 with the packages pinned in `b
 
 The alphabet and fingerspelling models work with the base requirements. The word model (`POST /api/predict/word`) needs three extra pieces:
 
-1. **The I3D checkpoint.** The repository tracks it with Git LFS, so a plain clone contains only a small pointer file. Restore the real 57 MB file:
+1. **The I3D checkpoint.** The repository tracks it with Git LFS, so a plain clone can contain only a small pointer file. SignBridge now downloads the real 57 MB file on the first word prediction, verifies its pinned SHA-256, and installs it atomically. You can still restore it ahead of time:
 
    ```bash
    git lfs pull
    ```
 
-   The server detects pointer files and reports "I3D checkpoint is a Git LFS pointer" until the real file is present. Alternatively set `I3D_WEIGHTS_PATH` to a copy stored elsewhere.
+   Set `WORD_AUTO_DOWNLOAD=0` to require manual provisioning, or use `I3D_WEIGHTS_PATH` for a copy stored elsewhere. Custom downloads require matching `I3D_WEIGHTS_URL` and `I3D_WEIGHTS_SHA256` values.
 
 2. **The optional Python dependencies** (`torch`, `opencv-python-headless`):
 
