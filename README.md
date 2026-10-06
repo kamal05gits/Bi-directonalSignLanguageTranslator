@@ -37,7 +37,7 @@ Confidence + alternatives
 Message builder / speech / fingerspelling sequence ─► /api/emergency/alert ─► Twilio SMS + voice call (when configured)
 ```
 
-The frontend uses relative API URLs, so it works locally and on Render without CORS configuration. Images, landmark vectors, and clips are processed in memory and never written to disk (the word predictor uses a self-deleting temp file purely so OpenCV can decode the clip).
+The frontend uses relative API URLs, so it works locally and on Render without CORS configuration. Images, landmark vectors, and clips are processed in memory and never written to disk by SignBridge (the word predictor uses a self-deleting temp file purely so OpenCV can decode the clip). If the optional Roboflow provider is enabled, the image is sent to Roboflow's hosted inference service; see the deployment/privacy note below.
 
 ## Run locally with Docker
 
@@ -97,6 +97,31 @@ The default Render deployment is the lean build. To deploy the word model as wel
 
 Render reads the `PORT` environment variable automatically. The container runs one worker to avoid loading multiple copies of TensorFlow into memory.
 
+### Optional Roboflow ISL detector
+
+The Roboflow Universe project at <https://universe.roboflow.com/indiansigns/indian-sign-language_40> is an **object-detection** model. Its published model identifier is `indian-sign-language_40/1`, so it can be used for the image/alphabet capture, but it does not replace the landmark model or the short-video word model. When configured, `/api/predict` and `/api/predict/alphabet` use Roboflow for the image request; `/api/predict/roboflow` always uses it explicitly. Without a key, the bundled alphabet model remains the fallback.
+
+The API key stays on the backend. Do not paste it into `frontend/assets/app.js`, commit it, or send it from the browser. Add these variables in the Render service's **Environment** settings (the Blueprint creates the non-secret entries automatically):
+
+```text
+ROBOFLOW_API_KEY=your Roboflow key       # required to enable it; Render secret
+ROBOFLOW_MODEL_ID=indian-sign-language_40/1
+ROBOFLOW_API_URL=https://serverless.roboflow.com
+ROBOFLOW_CONFIDENCE=0.25
+ROBOFLOW_OVERLAP=0.50
+```
+
+Only `ROBOFLOW_API_KEY` is required because the other values have the same defaults. After saving the secret, redeploy the service and check `GET /api/health`: `providers.roboflow.available` should be `true`, and the alphabet model detail should mention the Roboflow model. The image sent for recognition is forwarded to Roboflow for inference and is not stored by SignBridge; review Roboflow's plan, privacy, and rate limits before using it with real users.
+
+For local development, set the key only in your shell or an untracked `.env` mechanism before starting Uvicorn:
+
+```bash
+export ROBOFLOW_API_KEY='your-key'
+uvicorn backend.app.main:app --reload --host 0.0.0.0 --port 10000
+```
+
+The hosted API may reject a key that is limited to a different workspace or model. If that happens, verify the key has inference permission for `indian-sign-language_40/1`; never work around the error by exposing the key client-side.
+
 ## API
 
 ### `GET /api/health`
@@ -129,6 +154,14 @@ Example response:
   ]
 }
 ```
+
+When `ROBOFLOW_API_KEY` is configured, the same image route uses the hosted detector. Use `/api/predict/roboflow` to require that provider explicitly:
+
+```bash
+curl -F "file=@hand-sign.jpg" https://YOUR-RENDER-SERVICE.onrender.com/api/predict/roboflow
+```
+
+Roboflow detections are returned in the normal ranked `label`/`confidence` response shape. If no object is detected, the endpoint returns HTTP 422 rather than inventing a label.
 
 ### `POST /api/predict/fingerspelling`
 
@@ -227,6 +260,11 @@ curl -H "Content-Type: application/json" \
 | `WORD_AUTO_DOWNLOAD` | `1` | Securely download a missing/LFS-pointer I3D checkpoint on the first word prediction |
 | `I3D_WEIGHTS_URL` | pinned repository asset | Override the checkpoint download URL |
 | `I3D_WEIGHTS_SHA256` | pinned checksum | Expected checkpoint SHA-256; a mismatched download is discarded |
+| `ROBOFLOW_API_KEY` | *(unset)* | Server-side key for the optional Roboflow image detector |
+| `ROBOFLOW_MODEL_ID` | `indian-sign-language_40/1` | Roboflow model/version identifier |
+| `ROBOFLOW_API_URL` | `https://serverless.roboflow.com` | Roboflow inference base URL |
+| `ROBOFLOW_CONFIDENCE` | `0.25` | Minimum confidence sent to the Roboflow detector |
+| `ROBOFLOW_OVERLAP` | `0.50` | Detection overlap/NMS setting sent to Roboflow |
 | `TWILIO_ACCOUNT_SID` | *(unset)* | Twilio Account SID — required for real emergency delivery |
 | `TWILIO_AUTH_TOKEN` | *(unset)* | Twilio Auth Token |
 | `TWILIO_FROM_NUMBER` | *(unset)* | Your Twilio number (E.164) that sends the SMS and places the call |

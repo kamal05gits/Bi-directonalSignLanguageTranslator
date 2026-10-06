@@ -3,7 +3,8 @@
 Three recognition models are served behind one API, and can be used one at
 a time or combined in a single soft-voting ensemble request:
 
-- ``alphabet``: single-frame 64x64 photo CNN (bundled, always deployable).
+- ``alphabet``: single-frame 64x64 photo CNN (bundled, always deployable), or
+  the optional Roboflow ISL object detector when ``ROBOFLOW_API_KEY`` is set.
 - ``fingerspelling``: MLP over a 126-value MediaPipe hand-landmark vector
   extracted in the browser (bundled, always deployable).
 - ``word``: CISLR word classifier over I3D video features. It needs the Git
@@ -45,6 +46,7 @@ from .services.alphabet_predictor import AlphabetPredictor
 from .services.ensemble import EnsembleError, ModelSource, combine, not_run
 from .services.fingerspelling_predictor import FEATURE_DIM, FingerspellingPredictor
 from .services.keras_classifier import Prediction
+from .services.roboflow_predictor import RoboflowPredictor
 from .services.twilio_notifier import TwilioConfig, TwilioNotifier
 from .services.word_predictor import WordPredictor
 
@@ -115,6 +117,9 @@ word_predictor = WordPredictor(
     ),
     checkpoint_sha256=I3D_WEIGHTS_SHA256,
 )
+# Optional hosted detector. When ROBOFLOW_API_KEY is absent, the bundled
+# alphabet classifier remains the image provider and the app works offline.
+roboflow_predictor = RoboflowPredictor()
 translator = DictionaryTranslator()
 twilio_notifier = TwilioNotifier(TwilioConfig.from_env())
 
@@ -130,6 +135,7 @@ class HealthResponse(BaseModel):
     model_available: bool
     model_loaded: bool
     models: dict[str, ModelHealth]
+    providers: dict[str, ModelHealth] = Field(default_factory=dict)
 
 
 class PredictionItem(BaseModel):
@@ -219,14 +225,31 @@ def _response(results: list[Prediction], threshold: float) -> PredictionResponse
     )
 
 
+def _roboflow_available() -> bool:
+    """Return whether the optional hosted detector is configured and usable."""
+    return roboflow_predictor.availability()[0]
+
+
 @app.get("/api/health", response_model=HealthResponse)
 def health() -> HealthResponse:
     word_available, word_detail = word_predictor.availability()
+    roboflow_available, roboflow_detail = roboflow_predictor.availability()
+    local_alphabet_available = alphabet_predictor.available
+    alphabet_available = roboflow_available or local_alphabet_available
+    if roboflow_available:
+        alphabet_detail = roboflow_detail
+        alphabet_loaded = roboflow_predictor.loaded
+    elif local_alphabet_available:
+        alphabet_detail = "ready (bundled model)"
+        alphabet_loaded = alphabet_predictor.loaded
+    else:
+        alphabet_detail = "Alphabet model files are missing."
+        alphabet_loaded = False
     models = {
         "alphabet": ModelHealth(
-            available=alphabet_predictor.available,
-            loaded=alphabet_predictor.loaded,
-            detail="ready" if alphabet_predictor.available else "Alphabet model files are missing.",
+            available=alphabet_available,
+            loaded=alphabet_loaded,
+            detail=alphabet_detail,
         ),
         "fingerspelling": ModelHealth(
             available=fingerspelling_predictor.available,
@@ -241,6 +264,13 @@ def health() -> HealthResponse:
         model_available=alphabet_health.available,
         model_loaded=alphabet_health.loaded,
         models=models,
+        providers={
+            "roboflow": ModelHealth(
+                available=roboflow_available,
+                loaded=roboflow_predictor.loaded,
+                detail=roboflow_detail,
+            )
+        },
     )
 
 
@@ -261,12 +291,20 @@ async def _read_upload(file: UploadFile, limit: int, error: str) -> bytes:
     return payload
 
 
-def _predict_image(file: UploadFile, payload: bytes) -> PredictionResponse:
+async def _predict_image(
+    file: UploadFile, payload: bytes, *, force_roboflow: bool = False
+) -> PredictionResponse:
     image = _decode_image(file, payload)
+    use_roboflow = force_roboflow or _roboflow_available()
     try:
-        result = alphabet_predictor.predict(image, top_k=5)
+        if use_roboflow:
+            result = await run_in_threadpool(roboflow_predictor.predict, image, 5)
+        else:
+            result = alphabet_predictor.predict(image, top_k=5)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
     except RuntimeError as exc:
-        LOGGER.exception("Alphabet prediction failed")
+        LOGGER.exception("Image prediction failed")
         raise HTTPException(503, str(exc)) from exc
     return _response(result, _confidence_threshold("CONFIDENCE_THRESHOLD", "0.60"))
 
@@ -275,13 +313,24 @@ def _predict_image(file: UploadFile, payload: bytes) -> PredictionResponse:
 async def predict(file: Annotated[UploadFile, File(description="JPEG, PNG, or WebP hand image")]) -> PredictionResponse:
     """Backward-compatible alias of /api/predict/alphabet."""
     payload = await _read_upload(file, MAX_UPLOAD_BYTES, "Image exceeds the 5 MB upload limit.")
-    return _predict_image(file, payload)
+    return await _predict_image(file, payload)
 
 
 @app.post("/api/predict/alphabet", response_model=PredictionResponse)
 async def predict_alphabet(file: Annotated[UploadFile, File(description="JPEG, PNG, or WebP hand image")]) -> PredictionResponse:
+    """Use Roboflow when configured, otherwise use the bundled photo model."""
     payload = await _read_upload(file, MAX_UPLOAD_BYTES, "Image exceeds the 5 MB upload limit.")
-    return _predict_image(file, payload)
+    return await _predict_image(file, payload)
+
+
+@app.post("/api/predict/roboflow", response_model=PredictionResponse)
+async def predict_roboflow(file: Annotated[UploadFile, File(description="JPEG, PNG, or WebP hand image")]) -> PredictionResponse:
+    """Explicit Roboflow endpoint; unlike /alphabet it never falls back locally."""
+    available, detail = roboflow_predictor.availability()
+    if not available:
+        raise HTTPException(503, detail)
+    payload = await _read_upload(file, MAX_UPLOAD_BYTES, "Image exceeds the 5 MB upload limit.")
+    return await _predict_image(file, payload, force_roboflow=True)
 
 
 @app.post("/api/predict/fingerspelling", response_model=PredictionResponse)
@@ -384,17 +433,21 @@ def _success_source(model: str, results: list[Prediction]) -> ModelSource:
 
 
 async def _run_alphabet_source(file: UploadFile) -> ModelSource:
-    if not alphabet_predictor.available:
+    use_roboflow = _roboflow_available()
+    if not use_roboflow and not alphabet_predictor.available:
         return ModelSource("alphabet", ran=True, detail="Alphabet model files are missing.")
     try:
         payload = await _read_upload(file, MAX_UPLOAD_BYTES, "Image exceeds the 5 MB upload limit.")
         image = _decode_image(file, payload)
-        result = await run_in_threadpool(alphabet_predictor.predict, image, len(alphabet_predictor.labels))
+        if use_roboflow:
+            result = await run_in_threadpool(roboflow_predictor.predict, image, 5)
+        else:
+            result = await run_in_threadpool(alphabet_predictor.predict, image, len(alphabet_predictor.labels))
     except HTTPException as exc:
         return ModelSource("alphabet", ran=True, detail=str(exc.detail), client_error=True)
     except (OSError, ValueError, RuntimeError) as exc:
-        LOGGER.exception("Alphabet prediction failed in combined request")
-        return ModelSource("alphabet", ran=True, detail=f"Alphabet model failed: {exc}")
+        LOGGER.exception("Image prediction failed in combined request")
+        return ModelSource("alphabet", ran=True, detail=f"Image model failed: {exc}")
     return _success_source("alphabet", result)
 
 
@@ -519,20 +572,28 @@ async def predict_combined(
 @app.get("/api/info")
 def info() -> dict[str, object]:
     return {
-        "recognition": "ISL fingerspelling (photo or hand landmarks), CISLR word video recognition, and a combined soft-voting ensemble of all three models",
+        "recognition": "ISL fingerspelling (photo or hand landmarks), optional Roboflow object detection, CISLR word video recognition, and a combined ensemble",
         "labels": alphabet_predictor.labels,
         "input_guidance": "Keep one hand centered in the guide with a plain, well-lit background.",
         "features": {
             "combined_recognition": "POST /api/predict/combined with any mix of image, landmarks, and video",
+            "roboflow_recognition": "POST /api/predict/roboflow (enabled by ROBOFLOW_API_KEY)",
             "continuous_recognition": "POST /api/continuous/session then stream landmark frames",
             "translation_languages": list(translator.LANGUAGES.keys()),
             "emergency_phrases": "GET /api/emergency/phrases (prototype; not real dispatch)",
+        },
+        "providers": {
+            "roboflow": {
+                "configured": roboflow_predictor.configured,
+                "model_id": roboflow_predictor.model_id,
+                "api_url": roboflow_predictor.api_url,
+            }
         },
         "models": {
             "alphabet": {
                 "input": "single image",
                 "labels": len(alphabet_predictor.labels),
-                "guidance": "Hold one alphabet sign steady inside the guide.",
+                "guidance": "Hold one alphabet sign steady inside the guide. When configured, the Roboflow detector is used for this image request.",
             },
             "fingerspelling": {
                 "input": "hand landmarks extracted in the browser",

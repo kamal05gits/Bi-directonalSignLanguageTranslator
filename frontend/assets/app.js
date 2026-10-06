@@ -100,6 +100,14 @@ async function checkApi() {
     els.apiStatus.className = data.model_available ? 'status online' : 'status offline';
     els.apiStatus.querySelector('span').textContent = data.model_available ? 'Service ready' : 'Model missing';
     modelHealth = data.models || {};
+    const roboflowEnabled = Boolean(data.providers && data.providers.roboflow && data.providers.roboflow.available);
+    MODES.alphabet.privacy = roboflowEnabled
+      ? 'The image is sent to Roboflow for recognition and is not stored by SignBridge.'
+      : 'Images are processed for recognition and are not stored.';
+    MODES.combined.privacy = roboflowEnabled
+      ? 'The frame is sent to Roboflow; landmarks and the clip are processed by SignBridge and never stored.'
+      : 'One frame, its hand landmarks, and the clip are processed together and never stored.';
+    els.privacyNote.textContent = MODES[mode].privacy;
     // Continuous mode reuses the fingerspelling model under the hood.
     modelHealth.continuous = modelHealth.fingerspelling;
     // Combined mode runs every model that is available on one capture.
