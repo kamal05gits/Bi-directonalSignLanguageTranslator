@@ -63,3 +63,31 @@
 .finger-unknown{flex:0 0 54px;height:62px;border-radius:13px;background:#f6f4ec;display:grid;place-items:center;font:700 22px Manrope;color:#9aa096;border:1px dashed #d3d6cd}
 .finger-note{color:var(--muted);font-size:12px;margin:4px 0 0}
 .finger-note:empty{display:none}
+
+/* --- Text to sign (step 03): its own input, playback, and status chip --- */
+.reverse-card>label{display:block;font-size:12px;font-weight:700;margin:14px 0 7px}
+#signInput{width:100%;resize:vertical;border:1px solid var(--line);border-radius:13px;padding:13px;font:500 17px 'DM Sans';outline:none;background:#fff;color:var(--ink)}
+#signInput:focus{border-color:#8bab72;box-shadow:0 0 0 3px #eff7e7}
+.sign-controls{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:9px;flex-wrap:wrap}
+.sign-controls>span{font-size:11px;color:var(--muted)}
+.sign-buttons{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.sign-speed{display:flex;align-items:center;gap:5px;font-size:11px;color:var(--muted)}
+.sign-speed select{border:1px solid var(--line);border-radius:8px;padding:5px 7px;font:600 11px 'DM Sans';background:#fff;color:var(--ink)}
+.small-button.playing{background:var(--danger);border-color:var(--danger);color:#fff}
+.small-button:disabled{opacity:.45;cursor:not-allowed}
+.sync-chip{display:inline-flex;align-items:center;gap:5px;border-radius:999px;padding:5px 11px;font:600 11px 'DM Sans';border:1px solid var(--line);background:#f6f8f4;color:var(--muted)}
+.sync-chip.linked{border-color:#d8eccf;background:#f0f7ea;color:#2f5540}
+.sync-chip.custom{border-color:#dfe3d9;background:#fafbf9;color:var(--muted)}
+.sign-player{display:grid;grid-template-columns:88px 1fr;gap:14px;align-items:center;margin-top:14px;padding:12px;border:1px solid var(--line);border-radius:17px;background:#fafbf9}
+.sign-current{display:grid;place-items:center;height:88px;border-radius:15px;background:var(--ink);color:var(--lime);font:800 44px Manrope;text-transform:uppercase}
+.sign-current.space{background:#eef1ea;color:var(--muted);font-size:34px}
+.sign-current.unsupported{background:#f6f4ec;color:#9aa096;text-transform:none}
+.sign-player-copy strong{display:block;font:700 14px Manrope}
+.sign-player-copy span{display:block;color:var(--muted);font-size:12px;margin-top:3px;min-height:16px}
+.sign-player-copy .meter{margin-top:9px}
+.finger-letter,.finger-unknown{cursor:pointer;transition:.18s transform,.18s box-shadow}
+.finger-letter:hover,.finger-unknown:hover{transform:translateY(-2px)}
+.finger-letter.playing{background:var(--ink);color:var(--lime);border-color:var(--ink);box-shadow:0 10px 24px rgba(17,24,39,.22)}
+.finger-unknown.playing{border-style:solid;border-color:var(--ink);box-shadow:0 10px 24px rgba(17,24,39,.18)}
+.finger-space.playing{border-left:3px solid var(--ink)}
+@media(max-width:800px){.sign-controls{align-items:flex-start}.sign-buttons{justify-content:flex-start}.sign-player{grid-template-columns:70px 1fr}.sign-current{height:70px;font-size:34px}}

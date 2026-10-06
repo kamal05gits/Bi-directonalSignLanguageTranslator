@@ -1,6 +1,6 @@
 # Signora — Bidirectional ISL Translator
 
-Signora is a camera-based Indian Sign Language (ISL) translation prototype with **three bundled recognition models, a combined all-three-models ensemble mode, and a continuous live-recognition pipeline**. It recognizes alphabet signs from webcam photos, reads finger positions from your hand skeleton (one shot or streamed continuously into a sentence), classifies short signed-word video clips, merges all three models into one consensus prediction, lets you assemble and edit a message, translates it into Tamil/Hindi, reads it aloud (including in the translated language), raises one-tap emergency phrases delivered by Twilio as an SMS and a synthesized voice call to your own number, and turns typed text into an easy-to-follow fingerspelling sequence.
+Signora is a camera-based Indian Sign Language (ISL) translation prototype with **three bundled recognition models, a combined all-three-models ensemble mode, and a continuous live-recognition pipeline**. It recognizes alphabet signs from webcam photos, reads finger positions from your hand skeleton (one shot or streamed continuously into a sentence), classifies short signed-word video clips, merges all three models into one consensus prediction, lets you assemble and edit a message, translates it into Tamil/Hindi, reads it aloud (including in the translated language), raises one-tap emergency phrases delivered by Twilio as an SMS and a synthesized voice call to your own number, and — in the other direction — turns text typed into its own box into a playable, step-by-step fingerspelling sequence.
 
 ## What works
 
@@ -16,6 +16,7 @@ Signora is a camera-based Indian Sign Language (ISL) translation prototype with 
 - Live hand-landmark overlay drawn over the video feed (MediaPipe drawing utils)
 - Confidence thresholds and ranked alternative predictions for every model
 - Model picker UI with per-model availability indicators fed by `/api/health`
+- **Text to sign** (`POST /api/text-to-sign`) — the reverse direction has its own text box in the UI (step 03). Anything you type is converted server-side into an ordered fingerspelling plan: one step per character with the letter to sign, the pauses between words, and an explicit "no letter sign" step (with the reason) for digits, punctuation, and accented characters. The sequence can be played back at three paces, one sign at a time, and any tile can be tapped to jump to it. The box follows the recognized message by default and detaches as soon as you type your own text; if the API is unreachable the browser applies the same rules locally and says so.
 - Message editing, browser text-to-speech with replay/stop/mute and per-language voice selection, and text-to-letter sequencing
 - Responsive, accessible frontend served by the same FastAPI service
 - Docker and Render Blueprint deployment
@@ -35,6 +36,8 @@ Browser webcam
 Confidence + alternatives
    ▼
 Message builder / speech / fingerspelling sequence ─► /api/emergency/alert ─► Twilio SMS + voice call (when configured)
+
+Typed text ─────────────► POST /api/text-to-sign ─► ordered fingerspelling plan (letters · word gaps · unsignable characters)
 ```
 
 The frontend uses relative API URLs, so it works locally and on Render without CORS configuration. Images, landmark vectors, and clips are processed in memory and never written to disk by Signora (the word predictor uses a self-deleting temp file purely so OpenCV can decode the clip). If the optional Roboflow provider is enabled, the image is sent to Roboflow's hosted inference service; see the deployment/privacy note below.
@@ -221,6 +224,34 @@ curl -H "Content-Type: application/json" -d '{"landmarks": [ ...126 values... ]}
 
 Other endpoints on the same session: `GET .../session/{id}` (current text/tokens), `POST .../space`, `POST .../punctuation` (`{"mark": "."}`), `POST .../backspace`, `POST .../clear`, `DELETE .../session/{id}`.
 
+### `POST /api/text-to-sign` and `GET /api/text-to-sign/alphabet`
+
+The text → sign direction. Send up to 240 characters of text and get back the ordered plan a signer can follow. Runs of whitespace collapse into a single `space` step (the pause between words), and any character that has no letter sign is returned as an `unsupported` step with the reason instead of being dropped or mapped onto a lookalike. No model is loaded, so this endpoint also works on a deployment without TensorFlow.
+
+```bash
+curl -H "Content-Type: application/json" -d '{"text": "Hi sam"}' \
+  http://localhost:10000/api/text-to-sign
+```
+
+```json
+{
+  "text": "Hi sam",
+  "normalized": "hi sam",
+  "supported": true,
+  "letter_count": 5,
+  "word_count": 2,
+  "unsupported": [],
+  "message": "5 letters to sign across 2 words.",
+  "steps": [
+    {"index": 0, "kind": "letter", "character": "h", "label": "H", "hint": "Fingerspell the letter H.", "word_index": 1},
+    {"index": 1, "kind": "letter", "character": "i", "label": "I", "hint": "Fingerspell the letter I.", "word_index": 1},
+    {"index": 2, "kind": "space", "character": " ", "label": "", "hint": "Pause briefly — this is the gap between two words.", "word_index": null}
+  ]
+}
+```
+
+`GET /api/text-to-sign/alphabet` lists the letters this deployment can actually offer — taken from the fingerspelling model's own label file, falling back to a–z when no label file is present.
+
 ### `GET /api/languages` and `POST /api/translate`
 
 Lists supported target languages and translates English text/phrases with a bundled offline dictionary (no third-party translation API or network call). Unresolved words are reported explicitly rather than guessed.
@@ -289,4 +320,4 @@ When any Twilio variable is missing, emergency alerts stay on-screen/spoken only
 python -m pytest -q
 ```
 
-The suite covers dataset importers, feature extraction, prediction engines (including the live-stream confidence stabilizer), the three model services, the soft-voting ensemble, the Twilio notifier (against a fake Twilio client — no network or credentials needed), the sentence/translation/emergency modules, and the full HTTP API (combined predictions, continuous session, translation, emergency). Tests that need FastAPI, TensorFlow, PyTorch, or OpenCV skip automatically when those packages are not installed.
+The suite covers dataset importers, feature extraction, prediction engines (including the live-stream confidence stabilizer), the three model services, the soft-voting ensemble, the Twilio notifier (against a fake Twilio client — no network or credentials needed), the sentence/translation/text-to-sign/emergency modules, and the full HTTP API (combined predictions, continuous session, translation, text to sign, emergency). Tests that need FastAPI, TensorFlow, PyTorch, or OpenCV skip automatically when those packages are not installed.

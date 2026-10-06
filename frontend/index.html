@@ -154,10 +154,42 @@
       <p class="privacy">Bundled dictionary translation (works fully offline); unresolved words are reported, never guessed.</p>
     </section>
 
-    <section class="reverse-card">
-      <div><span class="step">03</span><h2>Text to fingerspelling</h2></div>
-      <p>Type text above to see the alphabet sequence a signer can follow.</p>
+    <section class="reverse-card" id="textToSignCard">
+      <div class="card-heading">
+        <div><span class="step">03</span><h2>Text to sign</h2></div>
+        <span id="signSource" class="sync-chip linked">Following your message</span>
+      </div>
+      <p>Type anything here and Signora turns it into the fingerspelling sequence a signer can follow — then play it back one sign at a time.</p>
+
+      <label for="signInput">Text to sign</label>
+      <textarea id="signInput" rows="2" maxlength="240" placeholder="Type text to sign, e.g. hello sam"></textarea>
+      <div class="sign-controls">
+        <span id="signCount">0 / 240</span>
+        <div class="sign-buttons">
+          <button id="useMessageButton" class="small-button" type="button">↑ Use my message</button>
+          <button id="signClearButton" class="small-button" type="button">Clear</button>
+          <label class="sign-speed" for="signSpeed">Pace
+            <select id="signSpeed">
+              <option value="1400">Slow</option>
+              <option value="900" selected>Normal</option>
+              <option value="550">Fast</option>
+            </select>
+          </label>
+          <button id="signPlayButton" class="small-button accent" type="button" disabled>▶ Play sequence</button>
+        </div>
+      </div>
+
+      <div id="signPlayer" class="sign-player" hidden>
+        <div class="sign-current" id="signCurrent">A</div>
+        <div class="sign-player-copy">
+          <strong id="signProgress">Step 1</strong>
+          <span id="signHint">Fingerspell the letter A.</span>
+          <div class="meter"><i id="signMeter"></i></div>
+        </div>
+      </div>
+
       <div id="fingerSequence" class="finger-sequence" role="list" aria-label="Fingerspelling sequence"><span class="sequence-empty">Your sequence will appear here</span></div>
+      <p id="signSummary" class="finger-note" aria-live="polite"></p>
       <p id="fingerNote" class="finger-note" aria-live="polite"></p>
     </section>
 

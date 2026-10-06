@@ -163,3 +163,45 @@ def test_margin_rule_rejects_close_race_below_threshold():
 def test_margin_rule_rejects_weak_leader_even_with_margin():
     results = [Prediction(label="a", confidence=0.30), Prediction(label="b", confidence=0.02)]
     assert main._is_accepted(results, 0.70) is False
+
+
+# --- Text to sign (reverse direction) -------------------------------------
+
+
+def test_text_to_sign_returns_an_ordered_fingerspelling_plan(client):
+    response = client.post("/api/text-to-sign", json={"text": "Hi sam"})
+    assert response.status_code == 200
+    data = response.json()
+    assert data["normalized"] == "hi sam"
+    assert [step["kind"] for step in data["steps"]] == [
+        "letter", "letter", "space", "letter", "letter", "letter",
+    ]
+    assert [step["label"] for step in data["steps"] if step["kind"] == "letter"] == list("HISAM")
+    assert data["letter_count"] == 5
+    assert data["word_count"] == 2
+    assert data["supported"] is True
+    assert data["unsupported"] == []
+
+
+def test_text_to_sign_flags_characters_without_a_letter_sign(client):
+    data = client.post("/api/text-to-sign", json={"text": "bus 42"}).json()
+    assert data["unsupported"] == ["4", "2"]
+    assert data["supported"] is False
+    assert [step["kind"] for step in data["steps"]][-2:] == ["unsupported", "unsupported"]
+    assert "cannot be fingerspelled" in data["message"]
+
+
+def test_text_to_sign_rejects_empty_and_oversized_text(client):
+    assert client.post("/api/text-to-sign", json={"text": ""}).status_code == 422
+    assert client.post("/api/text-to-sign", json={"text": "a" * 241}).status_code == 422
+
+
+def test_text_to_sign_alphabet_lists_what_the_deployment_can_offer(client):
+    data = client.get("/api/text-to-sign/alphabet").json()
+    assert data["count"] == len(data["letters"]) > 0
+    assert all(len(letter) == 1 for letter in data["letters"])
+    assert "not generated sign-language video" in data["note"]
+
+
+def test_info_advertises_the_text_to_sign_endpoint(client):
+    assert "text_to_sign" in client.get("/api/info").json()["features"]

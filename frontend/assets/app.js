@@ -1,5 +1,5 @@
 const $ = (id) => document.getElementById(id);
-const els = Object.fromEntries(['apiStatus','video','canvas','landmarkOverlay','cameraEmpty','cameraButton','pauseButton','captureButton','flipButton','stageTitle','guideLabel','privacyNote','predictionEmpty','predictionResult','predictionHint','letter','confidence','confidenceMeter','predictionState','modelChips','addButton','alternatives','message','characterCount','clearButton','spaceButton','periodButton','backspaceButton','speakButton','replayButton','stopSpeechButton','muteToggle','fingerSequence','fingerNote','toast','countdown','pausedOverlay','languageSelect','translateButton','speakTranslatedButton','translationOutput','emergencyButton','emergencyPanel','emergencyClose','emergencyNote','emergencyStatus','emergencyPhrases','emergencyBanner'].map(id => [id, $(id)]));
+const els = Object.fromEntries(['apiStatus','video','canvas','landmarkOverlay','cameraEmpty','cameraButton','pauseButton','captureButton','flipButton','stageTitle','guideLabel','privacyNote','predictionEmpty','predictionResult','predictionHint','letter','confidence','confidenceMeter','predictionState','modelChips','addButton','alternatives','message','characterCount','clearButton','spaceButton','periodButton','backspaceButton','speakButton','replayButton','stopSpeechButton','muteToggle','fingerSequence','fingerNote','toast','countdown','pausedOverlay','languageSelect','translateButton','speakTranslatedButton','translationOutput','emergencyButton','emergencyPanel','emergencyClose','emergencyNote','emergencyStatus','emergencyPhrases','emergencyBanner','signInput','signCount','signSource','useMessageButton','signClearButton','signPlayButton','signSpeed','signPlayer','signCurrent','signProgress','signHint','signMeter','signSummary'].map(id => [id, $(id)]));
 const modeButtons = [...document.querySelectorAll('.model-option')];
 const modelDots = Object.fromEntries([...document.querySelectorAll('[data-model-dot]')].map(dot => [dot.dataset.modelDot, dot]));
 
@@ -685,43 +685,185 @@ function addToMessage() {
   toast(`Added ${currentLabel}`);
 }
 
-// Renders the typed message as an ordered fingerspelling sequence. Both
-// bundled letter models only cover a-z, so anything else (digits, accents,
-// punctuation) is shown as an explicit "cannot be fingerspelled" tile and
-// summarised below, instead of being dropped without telling the user.
 function updateMessage() {
   els.characterCount.textContent = `${els.message.value.length} / 240`;
+  // The text-to-sign box mirrors the recognized message until the user types
+  // their own text into it; after that it keeps whatever they wrote.
+  if (signLinked && els.signInput.value !== els.message.value) {
+    els.signInput.value = els.message.value;
+    queueSignSequence();
+  }
+}
+
+// --- Text to sign (step 03): typed text -> fingerspelling sequence --------
+// The reverse direction of the recognizer. POST /api/text-to-sign owns the
+// rules (which letters this deployment can actually offer, where the word
+// pauses go, which characters have no letter sign), so the browser renders
+// exactly what the server promises. The same rules are mirrored locally as a
+// fallback so typing never goes dead if that request fails.
+
+const SIGN_PACE_DEFAULT = 900;
+let signLinked = true;     // following the recognized message
+let signSteps = [];
+let signDebounce = null;
+let signRequestId = 0;
+let signPlayTimer = null;
+let signPlayIndex = -1;
+
+function localSignSequence(text) {
+  const normalized = text.toLowerCase().trim().replace(/\s+/g, ' ');
+  const steps = [];
+  const unsupported = [];
+  let letterCount = 0;
+  let wordIndex = 0;
+  let atWordStart = true;
+  [...normalized].forEach(character => {
+    if (character === ' ') {
+      steps.push({index: steps.length, kind: 'space', character: ' ', label: '', hint: 'Pause briefly — this is the gap between two words.'});
+      atWordStart = true;
+      return;
+    }
+    if (atWordStart) { wordIndex += 1; atWordStart = false; }
+    if (/[a-z]/.test(character)) {
+      letterCount += 1;
+      steps.push({index: steps.length, kind: 'letter', character, label: character.toUpperCase(), hint: `Fingerspell the letter ${character.toUpperCase()}.`, word_index: wordIndex});
+    } else {
+      if (!unsupported.includes(character)) unsupported.push(character);
+      steps.push({index: steps.length, kind: 'unsupported', character, label: character, hint: `"${character}" has no letter sign — say or write it instead.`, word_index: wordIndex});
+    }
+  });
+  const plural = (count, noun) => `${count} ${noun}${count === 1 ? '' : 's'}`;
+  let message = `${plural(letterCount, 'letter')} to sign across ${plural(wordIndex, 'word')}.`;
+  if (unsupported.length) message += ` ${plural(unsupported.length, 'character')} cannot be fingerspelled.`;
+  return {text, normalized, steps, letter_count: letterCount, word_count: wordIndex, unsupported, supported: letterCount > 0 && !unsupported.length, message};
+}
+
+function updateSignCount() {
+  els.signCount.textContent = `${els.signInput.value.length} / 240`;
+}
+
+function queueSignSequence() {
+  updateSignCount();   // instant feedback; the sequence itself is debounced
+  clearTimeout(signDebounce);
+  signDebounce = setTimeout(refreshSignSequence, 180);
+}
+
+async function refreshSignSequence() {
+  clearTimeout(signDebounce);
+  const text = els.signInput.value;
+  updateSignCount();
+  stopSignPlayback();
+  if (!text.trim()) return renderSignSequence(null);
+  const requestId = ++signRequestId;
+  try {
+    const response = await fetch('/api/text-to-sign', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({text}),
+    });
+    if (!response.ok) throw new Error('text-to-sign request failed');
+    const data = await response.json();
+    if (requestId !== signRequestId) return;   // a newer keystroke already won
+    renderSignSequence(data);
+  } catch {
+    if (requestId !== signRequestId) return;
+    renderSignSequence(localSignSequence(text), true);
+  }
+}
+
+// Draws one tile per step. Letters are signable, a space is the pause
+// between words, and anything else is shown as an explicit "no letter sign"
+// tile and summarised below instead of being dropped silently.
+function renderSignSequence(data, offline = false) {
+  signSteps = data ? data.steps || [] : [];
+  signPlayIndex = -1;
+  els.signPlayer.hidden = true;
   els.fingerSequence.innerHTML = '';
+  els.signSummary.textContent = '';
   els.fingerNote.textContent = '';
-  if (!els.message.value) {
+  els.signPlayButton.disabled = !signSteps.length;
+  if (!signSteps.length) {
     els.fingerSequence.innerHTML = '<span class="sequence-empty">Your sequence will appear here</span>';
     return;
   }
-  const unspellable = [];
-  [...els.message.value.toLowerCase()].forEach(character => {
+  signSteps.forEach(step => {
     const tile = document.createElement('span');
     tile.setAttribute('role', 'listitem');
-    if (/[a-z]/.test(character)) {
+    tile.dataset.step = step.index;
+    tile.title = step.hint;
+    if (step.kind === 'letter') {
       tile.className = 'finger-letter';
-      tile.textContent = character;
-      tile.title = `Sign the letter ${character.toUpperCase()}`;
-      tile.setAttribute('aria-label', `Letter ${character.toUpperCase()}`);
-    } else if (/\s/.test(character)) {
+      tile.textContent = step.character;
+      tile.setAttribute('aria-label', `Letter ${step.label}`);
+    } else if (step.kind === 'space') {
       tile.className = 'finger-space';
-      tile.title = 'Space';
-      tile.setAttribute('aria-label', 'Space');
+      tile.setAttribute('aria-label', 'Word gap');
     } else {
       tile.className = 'finger-unknown';
-      tile.textContent = character;
-      tile.title = `"${character}" has no letter sign in this alphabet — say or write it instead`;
-      tile.setAttribute('aria-label', `${character}, no letter sign`);
-      if (!unspellable.includes(character)) unspellable.push(character);
+      tile.textContent = step.character;
+      tile.setAttribute('aria-label', `${step.character}, no letter sign`);
     }
+    tile.onclick = () => showSignStep(step.index);
     els.fingerSequence.appendChild(tile);
   });
-  if (unspellable.length) {
-    els.fingerNote.textContent = `No letter sign for ${unspellable.map(character => `"${character}"`).join(', ')} — these use number or non-manual signs, so say or write them instead.`;
+  els.signSummary.textContent = offline
+    ? `${data.message} (shown from the browser — the server could not be reached)`
+    : data.message;
+  const unsupported = data.unsupported || [];
+  if (unsupported.length) {
+    els.fingerNote.textContent = `No letter sign for ${unsupported.map(character => `"${character}"`).join(', ')} — these use number or non-manual signs, so say or write them instead.`;
   }
+}
+
+function showSignStep(index) {
+  const step = signSteps[index];
+  if (!step) return;
+  signPlayIndex = index;
+  els.signPlayer.hidden = false;
+  els.signCurrent.textContent = step.kind === 'space' ? '␣' : (step.label || step.character);
+  els.signCurrent.className = `sign-current ${step.kind}`;
+  els.signProgress.textContent = `Step ${index + 1} of ${signSteps.length}`;
+  els.signHint.textContent = step.hint;
+  els.signMeter.style.width = `${Math.round(((index + 1) / signSteps.length) * 100)}%`;
+  [...els.fingerSequence.children].forEach(tile => tile.classList.toggle('playing', Number(tile.dataset.step) === index));
+  const active = els.fingerSequence.querySelector('.playing');
+  if (active) active.scrollIntoView({behavior: 'smooth', block: 'nearest', inline: 'center'});
+}
+
+// Walks the sequence at the chosen pace, holding each sign long enough to
+// copy it. Word gaps are held a little shorter than letters.
+function playSignSequence() {
+  if (signPlayTimer) return stopSignPlayback();
+  if (!signSteps.length) return toast('Type some text to sign first.', true);
+  let index = signPlayIndex >= 0 && signPlayIndex < signSteps.length - 1 ? signPlayIndex + 1 : 0;
+  els.signPlayButton.textContent = '◼ Stop';
+  els.signPlayButton.classList.add('playing');
+  const advance = () => {
+    showSignStep(index);
+    const pace = Number(els.signSpeed.value) || SIGN_PACE_DEFAULT;
+    const hold = signSteps[index].kind === 'space' ? pace * 0.6 : pace;
+    index += 1;
+    signPlayTimer = setTimeout(index >= signSteps.length ? finishSignPlayback : advance, hold);
+  };
+  advance();
+}
+
+function finishSignPlayback() {
+  stopSignPlayback();
+  signPlayIndex = -1;   // the next play starts from the first sign again
+  toast('End of the sequence.');
+}
+
+function stopSignPlayback() {
+  clearTimeout(signPlayTimer);
+  signPlayTimer = null;
+  els.signPlayButton.textContent = '▶ Play sequence';
+  els.signPlayButton.classList.remove('playing');
+}
+
+function setSignLinked(linked) {
+  signLinked = linked;
+  els.signSource.textContent = linked ? 'Following your message' : 'Your own text';
+  els.signSource.className = `sync-chip ${linked ? 'linked' : 'custom'}`;
 }
 
 // --- Translation (Multilingual Output module) -----------------------------
@@ -900,6 +1042,24 @@ els.clearButton.onclick = async () => {
   els.message.value = ''; updateMessage();
 };
 els.message.oninput = updateMessage;
+els.signInput.oninput = () => {
+  setSignLinked(els.signInput.value === els.message.value);
+  queueSignSequence();
+};
+els.useMessageButton.onclick = () => {
+  if (!els.message.value.trim()) return toast('Build or type a message in step 02 first.', true);
+  els.signInput.value = els.message.value;
+  setSignLinked(true);
+  refreshSignSequence();
+  toast('Copied your message into the sign box.');
+};
+els.signClearButton.onclick = () => {
+  els.signInput.value = '';
+  setSignLinked(els.message.value === '');
+  refreshSignSequence();
+};
+els.signPlayButton.onclick = playSignSequence;
+els.signSpeed.onchange = () => { if (signPlayTimer) { stopSignPlayback(); playSignSequence(); } };
 els.speakButton.onclick = () => speakText(els.message.value, 'en-IN');
 els.replayButton.onclick = () => speakText(lastUtteranceText || els.message.value, 'en-IN');
 els.stopSpeechButton.onclick = () => { if ('speechSynthesis' in window) speechSynthesis.cancel(); };
@@ -916,4 +1076,6 @@ checkApi();
 // single health call made at page load.
 setInterval(checkApi, 30000);
 updateMessage();
+setSignLinked(true);
+refreshSignSequence();
 loadLanguages();

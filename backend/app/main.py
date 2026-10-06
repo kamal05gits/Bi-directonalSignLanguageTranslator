@@ -38,10 +38,12 @@ from PIL import Image, ImageOps
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from starlette.concurrency import run_in_threadpool
 
+from .language.text_to_sign import TextToSignConverter
 from .language.translator import DictionaryTranslator
 from .routes import continuous as continuous_routes
 from .routes import emergency as emergency_routes
 from .routes import language as language_routes
+from .routes import text_to_sign as text_to_sign_routes
 from .services.alphabet_predictor import AlphabetPredictor
 from .services.ensemble import EnsembleError, ModelSource, combine, not_run
 from .services.fingerspelling_predictor import FEATURE_DIM, FingerspellingPredictor
@@ -121,6 +123,14 @@ word_predictor = WordPredictor(
 # alphabet classifier remains the image provider and the app works offline.
 roboflow_predictor = RoboflowPredictor()
 translator = DictionaryTranslator()
+# Text -> sign (the reverse direction). It is built from the fingerspelling
+# model's own label file so the guidance only ever offers letters this
+# deployment actually recognizes; with no label file it falls back to a-z,
+# because the advice to a human signer stands even when the camera models
+# are not installed.
+text_to_sign_converter = TextToSignConverter(
+    fingerspelling_predictor.labels or alphabet_predictor.labels
+)
 twilio_notifier = TwilioNotifier(TwilioConfig.from_env())
 
 
@@ -579,6 +589,7 @@ def info() -> dict[str, object]:
             "combined_recognition": "POST /api/predict/combined with any mix of image, landmarks, and video",
             "roboflow_recognition": "POST /api/predict/roboflow (enabled by ROBOFLOW_API_KEY)",
             "continuous_recognition": "POST /api/continuous/session then stream landmark frames",
+            "text_to_sign": "POST /api/text-to-sign with typed text (no model required)",
             "translation_languages": list(translator.LANGUAGES.keys()),
             "emergency_phrases": "GET /api/emergency/phrases (prototype; not real dispatch)",
         },
@@ -610,6 +621,7 @@ def info() -> dict[str, object]:
 
 
 app.include_router(language_routes.build_router(translator))
+app.include_router(text_to_sign_routes.build_router(text_to_sign_converter))
 app.dependency_overrides[continuous_routes.get_predictor] = lambda: fingerspelling_predictor
 app.include_router(continuous_routes.router)
 app.include_router(emergency_routes.build_router(translator))

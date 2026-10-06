@@ -47,6 +47,11 @@ Four previously standalone, unit-tested-only components (`app.features.sequence_
   fully offline phrase/word dictionary (English → Tamil/Hindi). It never calls a third-party translation
   service (there is no API key in this deployment), and it reports unresolved words explicitly instead of
   guessing, matching the "never fabricate a result" policy used by the recognition models.
+- **`app.routes.text_to_sign`** (`/api/text-to-sign`, `/api/text-to-sign/alphabet`) exposes
+  `app.language.text_to_sign.TextToSignConverter` — the reverse direction, turning typed text into an
+  ordered fingerspelling plan (letters, word pauses, and explicitly-flagged characters with no letter
+  sign). It is pure Python with no model load, so it stays available — and unit-testable — on a
+  deployment without TensorFlow.
 - **`app.routes.emergency`** (`/api/emergency/*`) exposes `app.services.emergency` — a small set of
   pre-translated, high-value phrases plus an in-memory alert log. This is explicitly a **prototype**: it is
   not connected to any telephony, SMS, or dispatch provider, and every response says so.
@@ -55,7 +60,7 @@ Four previously standalone, unit-tested-only components (`app.features.sequence_
 
 - **Sign to text (one shot):** camera → one of the three models → letter or word → editable message → browser speech synthesis.
 - **Sign to text (continuous):** camera → streamed landmarks → `/api/continuous` session (buffer + stabilizer + sentence builder) → live-updating editable message.
-- **Text to sign guidance:** typed message → ordered alphabet tiles. This is a fingerspelling sequence, not generated sign-language video. Both letter models cover a–z only, so digits, punctuation, and accented characters are rendered as explicit "no letter sign" tiles and listed under the sequence rather than silently skipped.
+- **Text to sign guidance:** text typed into the step-03 box (or pulled in from the recognized message) → `POST /api/text-to-sign` → ordered alphabet tiles, played back one sign at a time. This is a fingerspelling sequence, not generated sign-language video. The signable alphabet comes from the fingerspelling model's own label file (a–z), so digits, punctuation, and accented characters are returned as explicit "no letter sign" steps — each with a reason — and listed under the sequence rather than silently skipped. The browser mirrors the same rules locally so the panel keeps working if the API call fails.
 - **Text to another language:** typed/recognized message → `/api/translate` → original + translated text → speech synthesis in the matching language/voice when available.
 
 ## Deployment boundary
