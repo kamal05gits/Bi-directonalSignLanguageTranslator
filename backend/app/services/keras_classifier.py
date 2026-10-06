@@ -36,12 +36,31 @@ class LazyKerasClassifier:
 
     name = "model"
 
-    def __init__(self, model_path: Path, labels_path: Path) -> None:
+    def __init__(self, model_path: Path, labels_path: Path, temperature: float = 1.0) -> None:
         self.model_path = Path(model_path)
         self.labels_path = Path(labels_path)
+        if temperature <= 0:
+            raise ValueError("temperature must be positive.")
+        self.temperature = temperature
         self._model: Any = None
         self._lock = threading.Lock()
         self.labels = read_labels(self.labels_path, self.name)
+
+    def _calibrate(self, probabilities: np.ndarray) -> np.ndarray:
+        """Temperature-scale softmax output to undo overconfidence.
+
+        Raising each probability to ``1/temperature`` and renormalizing is
+        mathematically identical to dividing the logits by ``temperature``
+        before the softmax. With ``temperature > 1`` a saturated distribution
+        (e.g. 99.9% on the top label even for garbage input) is softened, so
+        the runner-up labels keep honest, usable probabilities — which is
+        what lets frame averaging and temporal smoothing promote a correct
+        sign that would otherwise be stuck at a few percent.
+        """
+        if self.temperature == 1.0:
+            return probabilities
+        scaled = np.power(np.clip(probabilities, 1e-12, None), 1.0 / self.temperature)
+        return scaled / scaled.sum(axis=-1, keepdims=True)
 
     @property
     def loaded(self) -> bool:
@@ -78,8 +97,25 @@ class LazyKerasClassifier:
             for index in indices
         ]
 
-    def _predict_array(self, batch: np.ndarray, top_k: int) -> list[Prediction]:
+    def _predict_probabilities(self, batch: np.ndarray) -> np.ndarray:
+        """Run the model on a batch and return calibrated per-row distributions."""
         model = self._load()
         with self._lock:
-            probabilities = np.asarray(model.predict(batch, verbose=0))[0]
-        return self._rank(probabilities, top_k)
+            probabilities = np.asarray(model.predict(batch, verbose=0))
+        return self._calibrate(probabilities.reshape(len(batch), -1))
+
+    def _predict_array(self, batch: np.ndarray, top_k: int) -> list[Prediction]:
+        return self._rank(self._predict_probabilities(batch)[0], top_k)
+
+    def _predict_batch_mean(self, batch: np.ndarray, top_k: int) -> list[Prediction]:
+        """Classify every row of ``batch`` and rank the *averaged* distribution.
+
+        Each row is calibrated *before* averaging so one saturated frame
+        cannot dominate the vote. Averaging the full probability
+        distributions of several samples of the same sign (e.g. a burst of
+        camera frames) damps single-frame noise: a label that is
+        consistently strong across samples beats a label that spiked on one
+        bad frame, so the correct sign is far less likely to end up buried
+        in the low-confidence suggestions.
+        """
+        return self._rank(self._predict_probabilities(batch).mean(axis=0), top_k)

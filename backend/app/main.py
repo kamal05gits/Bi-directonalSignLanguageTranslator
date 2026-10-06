@@ -73,8 +73,26 @@ app = FastAPI(
     description="Indian Sign Language recognition API: alphabet photo model, hand-landmark fingerspelling model, CISLR word video model, a soft-voting combined ensemble, and Twilio-backed emergency alerts",
     version="2.1.0",
 )
+def _env_float(env_var: str, default: str) -> float:
+    try:
+        return float(os.getenv(env_var, default))
+    except ValueError:
+        return float(default)
+
+
 alphabet_predictor = AlphabetPredictor(MODEL, LABELS)
-fingerspelling_predictor = FingerspellingPredictor(FINGERSPELLING_MODEL, FINGERSPELLING_LABELS)
+# The bundled fingerspelling MLP is heavily overconfident (it answers ~100%
+# even for random input), which is what buried correct signs at a few percent
+# in the suggestions. Temperature scaling softens its softmax to honest
+# probabilities, and mirror TTA rescues signs made with the opposite hand /
+# flipped MediaPipe handedness. Both are tunable without a redeploy.
+fingerspelling_predictor = FingerspellingPredictor(
+    FINGERSPELLING_MODEL,
+    FINGERSPELLING_LABELS,
+    temperature=_env_float("FINGERSPELLING_TEMPERATURE", "2.5"),
+    mirror_tta=os.getenv("FINGERSPELLING_MIRROR_TTA", "1") not in {"0", "false", "False", ""},
+    mirror_margin=_env_float("FINGERSPELLING_MIRROR_MARGIN", "1.25"),
+)
 word_predictor = WordPredictor(WORD_MODEL, WORD_LABELS, WORD_NORMALIZATION, I3D_WEIGHTS, I3D_CODE_DIR)
 translator = DictionaryTranslator()
 twilio_notifier = TwilioNotifier(TwilioConfig.from_env())
@@ -126,8 +144,25 @@ class CombinedPredictionResponse(BaseModel):
     top_predictions: list[PredictionItem]
 
 
+MAX_LANDMARK_FRAMES = 10
+
+
 class LandmarkRequest(BaseModel):
-    landmarks: list[float] = Field(min_length=FEATURE_DIM, max_length=FEATURE_DIM)
+    """One landmark vector, or a short burst of them for the same sign.
+
+    ``frames`` lets the client send several samples captured milliseconds
+    apart; the server averages the model's probability distributions across
+    them, which is markedly more reliable than trusting a single frame.
+    """
+
+    landmarks: list[float] | None = Field(None, min_length=FEATURE_DIM, max_length=FEATURE_DIM)
+    frames: list[list[float]] | None = Field(None, min_length=1, max_length=MAX_LANDMARK_FRAMES)
+
+    def all_frames(self) -> list[list[float]]:
+        frames = list(self.frames or [])
+        if self.landmarks:
+            frames.append(self.landmarks)
+        return frames
 
 
 def _confidence_threshold(env_var: str, default: str) -> float:
@@ -137,11 +172,28 @@ def _confidence_threshold(env_var: str, default: str) -> float:
         return float(default)
 
 
+def _is_accepted(results: list[Prediction], threshold: float) -> bool:
+    """Confidence- and margin-aware acceptance.
+
+    A prediction is accepted when it clears the absolute threshold, or when
+    it is moderately confident *and* clearly ahead of the runner-up. The
+    margin rule rescues correct-but-softly-scored predictions (expected now
+    that temperature calibration spreads mass over similar-looking signs)
+    without accepting genuinely ambiguous ones, where the top two scores
+    are close.
+    """
+    top = results[0].confidence
+    if top >= threshold:
+        return True
+    runner_up = results[1].confidence if len(results) > 1 else 0.0
+    return top >= threshold * 0.6 and top >= runner_up * 2.0
+
+
 def _response(results: list[Prediction], threshold: float) -> PredictionResponse:
     return PredictionResponse(
         label=results[0].label,
         confidence=results[0].confidence,
-        accepted=results[0].confidence >= threshold,
+        accepted=_is_accepted(results, threshold),
         top_predictions=results,
     )
 
@@ -191,11 +243,11 @@ async def _read_upload(file: UploadFile, limit: int, error: str) -> bytes:
 def _predict_image(file: UploadFile, payload: bytes) -> PredictionResponse:
     image = _decode_image(file, payload)
     try:
-        result = alphabet_predictor.predict(image)
+        result = alphabet_predictor.predict(image, top_k=5)
     except RuntimeError as exc:
         LOGGER.exception("Alphabet prediction failed")
         raise HTTPException(503, str(exc)) from exc
-    return _response(result, _confidence_threshold("CONFIDENCE_THRESHOLD", "0.70"))
+    return _response(result, _confidence_threshold("CONFIDENCE_THRESHOLD", "0.60"))
 
 
 @app.post("/api/predict", response_model=PredictionResponse)
@@ -213,15 +265,27 @@ async def predict_alphabet(file: Annotated[UploadFile, File(description="JPEG, P
 
 @app.post("/api/predict/fingerspelling", response_model=PredictionResponse)
 def predict_fingerspelling(payload: LandmarkRequest) -> PredictionResponse:
-    """Classify a 126-value MediaPipe hand-landmark vector (wrist-relative)."""
+    """Classify 126-value MediaPipe hand-landmark vectors (wrist-relative).
+
+    Send one vector as ``landmarks`` or a burst of them as ``frames``; with
+    several frames the per-frame probability distributions are averaged
+    (soft vote) before ranking, which is much more robust to detection
+    jitter than a single-frame classification.
+    """
+    frames = payload.all_frames()
+    if not frames:
+        raise HTTPException(422, f"Provide 'landmarks' ({FEATURE_DIM} values) or 'frames' (a list of such vectors).")
     try:
-        result = fingerspelling_predictor.predict(payload.landmarks)
+        if len(frames) == 1:
+            result = fingerspelling_predictor.predict(frames[0], top_k=5)
+        else:
+            result = fingerspelling_predictor.predict_frames(frames, top_k=5)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     except RuntimeError as exc:
         LOGGER.exception("Fingerspelling prediction failed")
         raise HTTPException(503, str(exc)) from exc
-    return _response(result, _confidence_threshold("CONFIDENCE_THRESHOLD", "0.70"))
+    return _response(result, _confidence_threshold("CONFIDENCE_THRESHOLD", "0.60"))
 
 
 @app.post("/api/predict/word", response_model=PredictionResponse)
@@ -258,18 +322,32 @@ def _video_suffix(file: UploadFile) -> str:
     return suffix
 
 
-def _parse_landmarks_field(raw: str | None) -> tuple[list[float] | None, str | None]:
-    """Parse the JSON landmark form field into (values, error)."""
+def _parse_landmarks_field(raw: str | None) -> tuple[list[list[float]] | None, str | None]:
+    """Parse the JSON landmark form field into (frames, error).
+
+    Accepts either one flat array of ``FEATURE_DIM`` numbers (the original
+    contract) or an array of such arrays — a burst of samples of the same
+    sign that the fingerspelling model will soft-vote across.
+    """
     if raw is None or not raw.strip():
         return None, None
     try:
         value = json.loads(raw)
     except json.JSONDecodeError:
         return None, f"Landmarks must be a JSON array of {FEATURE_DIM} numbers."
+    error = (
+        f"Landmarks must be a JSON array of exactly {FEATURE_DIM} finite numbers, "
+        f"or an array of up to {MAX_LANDMARK_FRAMES} such arrays."
+    )
+    if not isinstance(value, list) or not value:
+        return None, error
+    nested = isinstance(value[0], list)
     try:
-        return LandmarkRequest(landmarks=value).landmarks, None
+        if nested:
+            return LandmarkRequest(frames=value).frames, None
+        return [LandmarkRequest(landmarks=value).landmarks], None
     except ValidationError:
-        return None, f"Landmarks must be a JSON array of exactly {FEATURE_DIM} finite numbers."
+        return None, error
 
 
 def _success_source(model: str, results: list[Prediction]) -> ModelSource:
@@ -300,15 +378,20 @@ async def _run_alphabet_source(file: UploadFile) -> ModelSource:
 
 
 async def _run_fingerspelling_source(raw: str) -> ModelSource:
-    values, error = _parse_landmarks_field(raw)
+    frames, error = _parse_landmarks_field(raw)
     if error:
         return ModelSource("fingerspelling", ran=True, detail=error, client_error=True)
     if not fingerspelling_predictor.available:
         return ModelSource("fingerspelling", ran=True, detail="Fingerspelling model files are missing.")
     try:
-        result = await run_in_threadpool(
-            fingerspelling_predictor.predict, values, len(fingerspelling_predictor.labels)
-        )
+        if len(frames) == 1:
+            result = await run_in_threadpool(
+                fingerspelling_predictor.predict, frames[0], len(fingerspelling_predictor.labels)
+            )
+        else:
+            result = await run_in_threadpool(
+                fingerspelling_predictor.predict_frames, frames, len(fingerspelling_predictor.labels)
+            )
     except ValueError as exc:
         return ModelSource("fingerspelling", ran=True, detail=str(exc), client_error=True)
     except (RuntimeError, OSError) as exc:
@@ -379,7 +462,7 @@ async def predict_combined(
     try:
         combined = combine(
             sources,
-            _confidence_threshold("CONFIDENCE_THRESHOLD", "0.70"),
+            _confidence_threshold("CONFIDENCE_THRESHOLD", "0.60"),
             _confidence_threshold("WORD_CONFIDENCE_THRESHOLD", "0.30"),
         )
     except EnsembleError:

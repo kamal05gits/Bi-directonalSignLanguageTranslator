@@ -111,3 +111,29 @@ def test_frame_rejects_unavailable_model(client):
     session_id = client.post("/api/continuous/session").json()["session_id"]
     response = client.post(f"/api/continuous/session/{session_id}/frame", json={"landmarks": _hand_vector()})
     assert response.status_code == 503
+
+
+def test_frame_returns_ranked_suggestions(client):
+    _override(SequencedStubPredictor(["a"] * 6))
+    session_id = client.post("/api/continuous/session").json()["session_id"]
+    data = None
+    for _ in range(6):
+        data = client.post(f"/api/continuous/session/{session_id}/frame", json={"landmarks": _hand_vector()}).json()
+    assert data["top_predictions"][0]["label"] == "a"
+    labels = [item["label"] for item in data["top_predictions"]]
+    assert "z" in labels  # the runner-up is surfaced, not discarded
+
+
+def test_append_accepts_a_suggested_letter_and_resets_smoothing(client):
+    _override(SequencedStubPredictor(["a"] * 10))
+    session_id = client.post("/api/continuous/session").json()["session_id"]
+    state = client.post(f"/api/continuous/session/{session_id}/append", json={"token": "Z"}).json()
+    assert state["text"] == "z"
+    assert state["tokens"] == ["z"]
+
+
+def test_append_rejects_non_letter_tokens(client):
+    _override(SequencedStubPredictor(["a"]))
+    session_id = client.post("/api/continuous/session").json()["session_id"]
+    response = client.post(f"/api/continuous/session/{session_id}/append", json={"token": "1!"})
+    assert response.status_code == 422

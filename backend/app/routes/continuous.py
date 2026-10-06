@@ -37,21 +37,32 @@ from pydantic import BaseModel, Field
 
 from ..features.sequence_buffer import SequenceBuffer
 from ..language.sentence_processor import SentenceProcessor
-from ..ml.predict import LabelStabilizer
+from ..ml.predict import DistributionSmoother, LabelStabilizer
 from ..services.fingerspelling_predictor import FEATURE_DIM, FingerspellingPredictor
 
 SESSION_TTL_SECONDS = 30 * 60
 BUFFER_FRAMES = 4
+SUGGESTION_COUNT = 4  # ranked alternatives returned with every frame
 
 router = APIRouter(prefix="/api/continuous", tags=["continuous"])
 
 
 @dataclass
 class ContinuousSession:
-    stabilizer: LabelStabilizer = field(default_factory=LabelStabilizer)
+    # 0.55 instead of the stabilizer's 0.70 default: fingerspelling output is
+    # temperature-calibrated now, so honest confidences run lower than the
+    # old saturated ones while still requiring a 3-frame hold to accept.
+    stabilizer: LabelStabilizer = field(default_factory=lambda: LabelStabilizer(confidence_threshold=0.55))
     sentence: SentenceProcessor = field(default_factory=lambda: SentenceProcessor(token_mode="character"))
     buffer: SequenceBuffer = field(default_factory=lambda: SequenceBuffer(BUFFER_FRAMES, FEATURE_DIM))
+    smoother: DistributionSmoother = field(default_factory=DistributionSmoother)
     last_seen: float = field(default_factory=time.monotonic)
+
+    def reset_recognition(self) -> None:
+        """Forget all smoothing state so the next sign starts fresh."""
+        self.stabilizer.reset()
+        self.buffer.clear()
+        self.smoother.reset()
 
 
 class SessionStore:
@@ -100,11 +111,21 @@ class PunctuationRequest(BaseModel):
     mark: str = Field(min_length=1, max_length=1)
 
 
+class AppendRequest(BaseModel):
+    token: str = Field(min_length=1, max_length=32, pattern=r"^[A-Za-z]+$")
+
+
+class SuggestionItem(BaseModel):
+    label: str
+    confidence: float = Field(ge=0, le=1)
+
+
 class FrameResponse(BaseModel):
     label: str | None = None
     confidence: float = 0.0
     accepted: bool = False
     reason: str = ""
+    top_predictions: list[SuggestionItem] = []
     text: str
     tokens: list[str]
 
@@ -149,8 +170,7 @@ def push_frame(
     if not any(vector):
         # No hand in frame: reset smoothing state so a fresh sign has to
         # re-earn its hold streak instead of inheriting stale history.
-        session.stabilizer.reset()
-        session.buffer.clear()
+        session.reset_recognition()
         return FrameResponse(label=None, confidence=0.0, accepted=False, reason="No hand detected", **_state(session))
 
     session.buffer.add(vector)
@@ -159,14 +179,19 @@ def push_frame(
 
     smoothed = session.buffer.as_array().mean(axis=0)
     try:
-        ranked = predictor.predict(smoothed)
+        ranked = predictor.predict(smoothed, top_k=SUGGESTION_COUNT + 1)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     except RuntimeError as exc:
         raise HTTPException(503, str(exc)) from exc
 
-    top = ranked[0]
-    stabilized = session.stabilizer.update(top.label, top.confidence)
+    # Smooth the whole ranked distribution over time, not just each frame's
+    # argmax: a label that is consistently strong overtakes one that spiked
+    # on a single noisy frame, so the right sign stops hiding in the
+    # low-confidence suggestions.
+    consensus = session.smoother.update((item.label, item.confidence) for item in ranked)
+    top_label, top_confidence = consensus[0]
+    stabilized = session.stabilizer.update(top_label, top_confidence)
     if stabilized.accepted:
         session.sentence.append_token(stabilized.label)
     return FrameResponse(
@@ -174,6 +199,10 @@ def push_frame(
         confidence=stabilized.confidence,
         accepted=stabilized.accepted,
         reason=stabilized.reason,
+        top_predictions=[
+            SuggestionItem(label=label, confidence=min(1.0, max(0.0, confidence)))
+            for label, confidence in consensus[: SUGGESTION_COUNT + 1]
+        ],
         **_state(session),
     )
 
@@ -182,8 +211,22 @@ def push_frame(
 def insert_space(session_id: str) -> StateResponse:
     session = _get(session_id)
     session.sentence.insert_space()
-    session.stabilizer.reset()
-    session.buffer.clear()
+    session.reset_recognition()
+    return StateResponse(**_state(session))
+
+
+@router.post("/session/{session_id}/append", response_model=StateResponse)
+def append_token(session_id: str, payload: AppendRequest) -> StateResponse:
+    """Manually accept a suggested label the recognizer ranked below top-1.
+
+    When the correct sign shows up in ``top_predictions`` with a lower
+    confidence than the (wrong) leader, the user can tap it instead of
+    re-signing; the smoothing state is reset so the correction does not keep
+    fighting the stale consensus.
+    """
+    session = _get(session_id)
+    session.sentence.append_token(payload.token.lower())
+    session.reset_recognition()
     return StateResponse(**_state(session))
 
 
@@ -205,8 +248,7 @@ def backspace(session_id: str) -> StateResponse:
 def clear(session_id: str) -> StateResponse:
     session = _get(session_id)
     session.sentence.clear()
-    session.stabilizer.reset()
-    session.buffer.clear()
+    session.reset_recognition()
     return StateResponse(**_state(session))
 
 

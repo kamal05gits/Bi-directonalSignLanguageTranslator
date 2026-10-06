@@ -211,8 +211,11 @@ curl -H "Content-Type: application/json" \
 | Environment variable | Default | Purpose |
 |---|---:|---|
 | `PORT` | `10000` | HTTP listen port |
-| `CONFIDENCE_THRESHOLD` | `0.70` | Minimum confidence for the alphabet and fingerspelling models |
+| `CONFIDENCE_THRESHOLD` | `0.60` | Minimum confidence for the alphabet and fingerspelling models (a clearly-leading prediction ≥ 60% of this is also accepted) |
 | `WORD_CONFIDENCE_THRESHOLD` | `0.30` | Minimum confidence for the word model |
+| `FINGERSPELLING_TEMPERATURE` | `2.5` | Softmax temperature calibration for the (overconfident) fingerspelling model; `1.0` disables it |
+| `FINGERSPELLING_MIRROR_TTA` | `1` | Also evaluate the hand-swapped mirror of each landmark input and keep the clearly stronger reading; `0` disables |
+| `FINGERSPELLING_MIRROR_MARGIN` | `1.25` | How decisively the mirrored reading must outscore the original before it is adopted |
 | `MAX_UPLOAD_BYTES` | `5242880` | Maximum input image size |
 | `MAX_VIDEO_BYTES` | `33554432` | Maximum input video size |
 | `ALPHABET_MODEL_PATH` / `ALPHABET_LABELS_PATH` | bundled model | Override alphabet artifacts |

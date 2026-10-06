@@ -9,6 +9,8 @@ const HANDS_CDN = `https://cdn.jsdelivr.net/npm/@mediapipe/hands@${HANDS_VERSION
 const DRAWING_VERSION = '0.3.1675466124';
 const DRAWING_CDN = `https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils@${DRAWING_VERSION}`;
 const CONTINUOUS_INTERVAL_MS = 350;
+const BURST_SAMPLES = 5;       // landmark samples captured per recognition
+const BURST_GAP_MS = 70;       // delay between burst samples
 const NO_HAND_FRAMES_BEFORE_SPACE = 4;
 const VOICE_LANGUAGE_TAGS = {ta: 'ta-IN', hi: 'hi-IN'};
 
@@ -322,6 +324,26 @@ function landmarksToVector(results) {
   return vector;
 }
 
+// Grabs several landmark samples of the same held sign, a few frames apart.
+// The server averages the model's probabilities across the burst, so one
+// jittery MediaPipe detection can no longer flip the top prediction — the
+// main reason the correct letter used to end up in the "Maybe" suggestions.
+async function sampleLandmarkFrames(hands, samples = BURST_SAMPLES, gapMs = BURST_GAP_MS) {
+  const frames = [];
+  let lastResults = null;
+  for (let i = 0; i < samples; i++) {
+    if (i) await new Promise(resolve => setTimeout(resolve, gapMs));
+    drawFrame(false); // raw camera orientation, matching the landmark training data
+    const results = await detectHands(els.canvas, hands);
+    lastResults = results;
+    if (results.multiHandLandmarks && results.multiHandLandmarks.length) {
+      frames.push(landmarksToVector(results));
+    }
+  }
+  drawLandmarkOverlay(lastResults || {});
+  return {frames, lastResults};
+}
+
 async function captureFingerspelling() {
   if (!stream || !els.video.videoWidth) return;
   els.captureButton.disabled = true;
@@ -329,13 +351,11 @@ async function captureFingerspelling() {
   try {
     const hands = await ensureHandTracker();
     els.captureButton.textContent = 'Recognizing…';
-    drawFrame(false);
-    const results = await detectHands(els.canvas, hands);
-    drawLandmarkOverlay(results);
-    if (!results.multiHandLandmarks || !results.multiHandLandmarks.length) {
+    const {frames} = await sampleLandmarkFrames(hands);
+    if (!frames.length) {
       return toast('No hand detected. Fill the guide with one well-lit hand.', true);
     }
-    const data = await postJson('/api/predict/fingerspelling', {landmarks: landmarksToVector(results)});
+    const data = await postJson('/api/predict/fingerspelling', {frames});
     showPrediction(data);
   } catch (error) {
     toast(error.message, true);
@@ -369,6 +389,29 @@ function renderContinuousState(data) {
   } else {
     els.predictionState.textContent = data.reason || 'Show a hand to begin';
   }
+  if (Array.isArray(data.top_predictions)) renderContinuousSuggestions(data);
+}
+
+// Live, tappable alternatives: when the recognizer's top guess is wrong but
+// the correct letter is among its suggestions, one tap adds it to the
+// sentence (and resets the smoothing state server-side).
+function renderContinuousSuggestions(data) {
+  const suggestions = (data.top_predictions || [])
+    .filter(item => item.label !== data.label && item.confidence >= 0.02)
+    .slice(0, 3);
+  els.alternatives.hidden = !suggestions.length;
+  els.alternatives.innerHTML = suggestions.length
+    ? `Or tap ${suggestions.map(item => `<button type="button" data-label="${item.label}">${item.label} ${Math.round(item.confidence * 100)}%</button>`).join('')}`
+    : '';
+  els.alternatives.querySelectorAll('button').forEach(button => button.onclick = async () => {
+    try {
+      const state = await postJson(`/api/continuous/session/${continuousSessionId}/append`, {token: button.dataset.label});
+      renderContinuousState(state);
+      toast(`Added ${button.dataset.label}`);
+    } catch (error) {
+      toast(error.message, true);
+    }
+  });
 }
 
 async function stepContinuous() {
@@ -508,18 +551,15 @@ async function recordWord() {
 
 // --- Combined mode (all three models, one merged prediction) ---------------
 
-// Grabs one mirrored JPEG for the photo model plus the raw-orientation hand
-// landmarks for the fingerspelling model from the same moment.
+// Grabs one mirrored JPEG for the photo model plus a short burst of
+// raw-orientation hand-landmark samples for the fingerspelling model, all
+// from the same held sign. The landmark burst is soft-voted server-side.
 async function grabFrameAndLandmarks() {
   const hands = await ensureHandTracker();
-  drawFrame(false); // raw camera orientation, matching the landmark training data
-  const results = await detectHands(els.canvas, hands);
-  drawLandmarkOverlay(results);
-  const hasHand = results.multiHandLandmarks && results.multiHandLandmarks.length;
-  const landmarks = hasHand ? landmarksToVector(results) : null;
+  const {frames} = await sampleLandmarkFrames(hands, 3, BURST_GAP_MS);
   drawFrame(true); // mirrored, matching what the user sees (photo model input)
   const imageBlob = await new Promise(resolve => els.canvas.toBlob(resolve, 'image/jpeg', .9));
-  return {imageBlob, landmarks};
+  return {imageBlob, landmarks: frames.length ? frames : null};
 }
 
 async function captureCombined() {
@@ -622,16 +662,19 @@ function showPrediction(data) {
   const percent = Math.round(data.confidence * 100);
   els.confidence.textContent = `${percent}% confidence`;
   els.confidenceMeter.style.width = `${percent}%`;
-  els.predictionState.textContent = data.accepted ? 'Sign recognized' : 'Low confidence — try again';
+  const alternatives = data.top_predictions.slice(1).filter(item => item.confidence >= 0.02).slice(0, 4);
+  els.predictionState.textContent = data.accepted
+    ? 'Sign recognized'
+    : (alternatives.length ? 'Not sure — tap the correct sign below if it is listed' : 'Low confidence — try again');
   els.addButton.disabled = !data.accepted;
   els.addButton.textContent = config.addLabel;
-  const alternatives = data.top_predictions.slice(1);
   els.alternatives.hidden = !alternatives.length;
   els.alternatives.innerHTML = alternatives.length ? `Maybe ${alternatives.map(item => `<button type="button" data-label="${item.label}">${item.label} ${Math.round(item.confidence * 100)}%</button>`).join('')}` : '';
   els.alternatives.querySelectorAll('button').forEach(button => button.onclick = () => {
     currentLabel = button.dataset.label;
     els.letter.textContent = currentLabel;
     els.addButton.disabled = false;
+    els.predictionState.textContent = `Using your pick: ${currentLabel.toUpperCase()}`;
   });
 }
 
