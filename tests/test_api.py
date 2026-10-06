@@ -91,6 +91,16 @@ def test_word_predict_accepts_video(client):
     assert response.json()["label"] == "hello"
 
 
+def test_word_predict_reports_deployment_state_before_running(client, monkeypatch):
+    """An undeployed word model must answer with the same detail as /api/health."""
+    unavailable = StubPredictor()
+    unavailable.availability = lambda: (False, "I3D checkpoint is missing. Restore it with: git lfs pull")
+    monkeypatch.setattr(main, "word_predictor", unavailable)
+    response = client.post("/api/predict/word", files={"file": ("sign.webm", b"fake", "video/webm")})
+    assert response.status_code == 503
+    assert "git lfs pull" in response.json()["detail"]
+
+
 def test_word_predict_rejects_non_video(client):
     response = client.post("/api/predict/word", files={"file": ("hand.png", _png_bytes(), "image/png")})
     assert response.status_code == 415

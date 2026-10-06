@@ -10,7 +10,12 @@ import numpy as np
 import pytest
 from app.services.fingerspelling_predictor import FEATURE_DIM, FingerspellingPredictor
 from app.services.keras_classifier import LazyKerasClassifier, read_labels
-from app.services.word_predictor import WordPredictor, is_lfs_pointer
+from app.services.word_predictor import (
+    IMAGE_SIZE,
+    NUM_INPUT_FRAMES,
+    WordPredictor,
+    is_lfs_pointer,
+)
 
 
 def _write_labels(tmp_path, name="labels.json", values=None):
@@ -108,3 +113,92 @@ def test_word_normalization_requires_mean_and_std(tmp_path):
     np.savez(tmp_path / "CISLR_NORMALIZATION.npz", other=np.zeros(4))
     with pytest.raises(RuntimeError, match="mean.*std"):
         predictor._load_normalization()
+
+
+class _FakeCapture:
+    """Minimal stand-in for ``cv2.VideoCapture`` that yields numbered frames."""
+
+    def __init__(self, total, tracker):
+        self._total = total
+        self._position = 0
+        self._tracker = tracker
+        self.released = False
+
+    def isOpened(self):  # noqa: N802 - matches the OpenCV API
+        return self._total > 0
+
+    def grab(self):
+        if self._position >= self._total:
+            return False
+        self._position += 1
+        return True
+
+    def read(self):
+        if self._position >= self._total:
+            return False, None
+        index = self._position
+        self._position += 1
+        self._tracker["decoded"].append(index)
+        return True, np.full((4, 6, 3), index % 256, dtype=np.uint8)
+
+    def release(self):
+        self.released = True
+
+
+class _FakeCv2:
+    COLOR_BGR2RGB = 4
+    INTER_LINEAR = 1
+    CAP_PROP_FRAME_COUNT = 7
+
+    def __init__(self, total):
+        self.total = total
+        self.tracker = {"decoded": [], "captures": []}
+
+    def VideoCapture(self, path):  # noqa: N802 - matches the OpenCV API
+        capture = _FakeCapture(self.total, self.tracker)
+        self.tracker["captures"].append(capture)
+        return capture
+
+    def cvtColor(self, frame, code):  # noqa: N802 - matches the OpenCV API
+        return frame
+
+    def resize(self, frame, size, interpolation=None):
+        width, height = size
+        return np.full((height, width, 3), frame.flat[0], dtype=frame.dtype)
+
+
+def _fake_cv2(monkeypatch, total):
+    fake = _FakeCv2(total)
+    monkeypatch.setattr(WordPredictor, "_import_cv2", staticmethod(lambda: fake))
+    return fake
+
+
+def test_sample_frames_returns_the_model_input_shape(tmp_path, monkeypatch):
+    fake = _fake_cv2(monkeypatch, total=300)
+    sampled = WordPredictor._sample_frames(tmp_path / "clip.webm")
+    assert sampled.shape == (NUM_INPUT_FRAMES, IMAGE_SIZE, IMAGE_SIZE, 3)
+    assert sampled.dtype == np.float32
+    assert sampled.min() >= -1.0 and sampled.max() <= 1.0
+    assert all(capture.released for capture in fake.tracker["captures"])
+
+
+def test_sample_frames_only_decodes_the_sampled_positions(tmp_path, monkeypatch):
+    """A long clip must never be held in memory frame by frame."""
+    fake = _fake_cv2(monkeypatch, total=5000)
+    WordPredictor._sample_frames(tmp_path / "clip.mp4")
+    expected = sorted(set(np.linspace(0, 4999, NUM_INPUT_FRAMES).astype(np.int32).tolist()))
+    assert fake.tracker["decoded"] == expected
+    assert len(fake.tracker["decoded"]) <= NUM_INPUT_FRAMES
+
+
+def test_sample_frames_repeats_frames_for_short_clips(tmp_path, monkeypatch):
+    fake = _fake_cv2(monkeypatch, total=3)
+    sampled = WordPredictor._sample_frames(tmp_path / "clip.webm")
+    assert sampled.shape[0] == NUM_INPUT_FRAMES
+    assert fake.tracker["decoded"] == [0, 1, 2]
+
+
+def test_sample_frames_rejects_an_unreadable_video(tmp_path, monkeypatch):
+    _fake_cv2(monkeypatch, total=0)
+    with pytest.raises(ValueError, match="Could not decode"):
+        WordPredictor._sample_frames(tmp_path / "clip.webm")
