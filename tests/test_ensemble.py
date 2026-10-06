@@ -105,6 +105,13 @@ def test_word_below_threshold_is_not_accepted_when_alone():
     combined = combine([_word_source("help", 0.2)], 0.7, 0.3)
     assert combined.label == "help"
     assert combined.accepted is False
+    assert combined.top_predictions[0].label == "help"
+
+
+def test_winning_word_is_first_in_combined_ranking():
+    combined = combine([_letter_source("alphabet", "a", 0.4), _word_source("help", 0.8)], 0.7, 0.3)
+    assert combined.label == "help"
+    assert [item.label for item in combined.top_predictions[:2]] == ["help", "a"]
 
 
 def test_single_letter_model_passes_through():

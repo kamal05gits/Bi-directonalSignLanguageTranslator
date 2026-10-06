@@ -63,6 +63,15 @@ I3D_WEIGHTS = Path(os.getenv(
     ROOT / "backend/i3d/weights/asl2000/FINAL_nslt_2000_iters=5104_top1=32.48_top5=57.31_top10=66.31.pt",
 ))
 I3D_CODE_DIR = Path(os.getenv("I3D_CODE_DIR", ROOT / "backend/i3d"))
+I3D_WEIGHTS_URL = os.getenv(
+    "I3D_WEIGHTS_URL",
+    "https://media.githubusercontent.com/media/kamal05gits/Bi-directonalSignLanguageTranslator/"
+    "main/backend/i3d/weights/asl2000/"
+    "FINAL_nslt_2000_iters=5104_top1=32.48_top5=57.31_top10=66.31.pt",
+)
+I3D_WEIGHTS_SHA256 = os.getenv(
+    "I3D_WEIGHTS_SHA256", "243a19e6deef3becffbfc5b7dd8adb32916c8bee482565ca243c082584732620"
+)
 MAX_UPLOAD_BYTES = int(os.getenv("MAX_UPLOAD_BYTES", 5 * 1024 * 1024))
 MAX_VIDEO_BYTES = int(os.getenv("MAX_VIDEO_BYTES", 32 * 1024 * 1024))
 VIDEO_SUFFIXES = {".webm", ".mp4", ".mov", ".m4v", ".avi"}
@@ -93,7 +102,19 @@ fingerspelling_predictor = FingerspellingPredictor(
     mirror_tta=os.getenv("FINGERSPELLING_MIRROR_TTA", "1") not in {"0", "false", "False", ""},
     mirror_margin=_env_float("FINGERSPELLING_MIRROR_MARGIN", "1.25"),
 )
-word_predictor = WordPredictor(WORD_MODEL, WORD_LABELS, WORD_NORMALIZATION, I3D_WEIGHTS, I3D_CODE_DIR)
+word_predictor = WordPredictor(
+    WORD_MODEL,
+    WORD_LABELS,
+    WORD_NORMALIZATION,
+    I3D_WEIGHTS,
+    I3D_CODE_DIR,
+    checkpoint_url=(
+        I3D_WEIGHTS_URL
+        if os.getenv("WORD_AUTO_DOWNLOAD", "1") not in {"0", "false", "False", ""}
+        else None
+    ),
+    checkpoint_sha256=I3D_WEIGHTS_SHA256,
+)
 translator = DictionaryTranslator()
 twilio_notifier = TwilioNotifier(TwilioConfig.from_env())
 

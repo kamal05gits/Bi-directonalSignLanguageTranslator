@@ -23,7 +23,9 @@ All models are loaded lazily and protected by locks. Render health checks theref
 
 ## Model availability reporting
 
-`GET /api/health` reports each model independently. The alphabet and fingerspelling models depend only on their bundled `.keras` files and labels. The word model additionally checks that its classifier, labels, and normalization stats are deployed, that the I3D checkpoint exists and is not a Git LFS pointer (pointer files are detected by their `version https://git-lfs` header), and that PyTorch and OpenCV are importable. Failures surface as actionable messages ("git lfs pull", "pip install -r backend/requirements-word.txt") rather than silent errors.
+`GET /api/health` reports each model independently. The alphabet and fingerspelling models depend only on their bundled `.keras` files and labels. The word model additionally checks that its classifier, labels, and normalization stats are deployed and that PyTorch and OpenCV are importable. If its I3D checkpoint is a Git LFS pointer, it is downloaded on the first prediction, checked against the pinned SHA-256, and atomically installed; malformed, oversized, partial, or checksum-mismatched downloads are discarded. Automatic download can be disabled with `WORD_AUTO_DOWNLOAD=0`. Failures surface as actionable messages rather than simulated predictions.
+
+At model load and prediction time, every classifier also validates its output width against the ordered label file and rejects duplicate/empty labels, non-finite values, logits, and malformed probability sums. This prevents a model artifact mismatch from quietly attaching the wrong label or confidence to an output index.
 
 ## Continuous recognition, NLP, translation, and emergency phrases
 

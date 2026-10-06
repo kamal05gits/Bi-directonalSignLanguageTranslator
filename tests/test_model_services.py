@@ -98,6 +98,43 @@ def test_word_availability_detects_lfs_pointer(tmp_path):
     assert "git lfs pull" in detail
 
 
+def test_word_predictor_can_replace_lfs_pointer_with_verified_download(tmp_path):
+    source = tmp_path / "real-checkpoint.pt"
+    source.write_bytes(b"verified checkpoint bytes")
+    import hashlib
+
+    predictor = WordPredictor(
+        model_path=tmp_path / "model.keras",
+        labels_path=_write_labels(tmp_path),
+        normalization_path=tmp_path / "normalization.npz",
+        weights_path=tmp_path / "weights.pt",
+        i3d_code_dir=tmp_path,
+        checkpoint_url=source.as_uri(),
+        checkpoint_sha256=hashlib.sha256(source.read_bytes()).hexdigest(),
+    )
+    predictor.weights_path.write_bytes(b"version https://git-lfs.github.com/spec/v1\n")
+    predictor._ensure_checkpoint()
+    assert predictor.weights_path.read_bytes() == source.read_bytes()
+    assert not is_lfs_pointer(predictor.weights_path)
+
+
+def test_word_predictor_rejects_unverified_download(tmp_path):
+    source = tmp_path / "wrong-checkpoint.pt"
+    source.write_bytes(b"not the expected file")
+    predictor = WordPredictor(
+        model_path=tmp_path / "model.keras",
+        labels_path=_write_labels(tmp_path),
+        normalization_path=tmp_path / "normalization.npz",
+        weights_path=tmp_path / "weights.pt",
+        i3d_code_dir=tmp_path,
+        checkpoint_url=source.as_uri(),
+        checkpoint_sha256="0" * 64,
+    )
+    with pytest.raises(RuntimeError, match="checksum mismatch"):
+        predictor._ensure_checkpoint()
+    assert not predictor.weights_path.exists()
+
+
 def test_is_lfs_pointer(tmp_path):
     pointer = tmp_path / "pointer.pt"
     pointer.write_bytes(b"version https://git-lfs.github.com/spec/v1\n")

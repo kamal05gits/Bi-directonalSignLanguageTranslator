@@ -136,6 +136,28 @@ def combine(
     else:
         method = "word model only"
 
+    # The public ranking must describe the actual combined decision.  The old
+    # response always returned only letter candidates, so word-only requests
+    # had an empty ``top_predictions`` array and a winning word could be absent
+    # from its own ranking.  Keep the selected primary first, then expose the
+    # remaining word/letter alternatives without duplicate labels.
+    candidates = list(letter_ranking)
+    if word_source:
+        candidates.extend(word_source.top_predictions)
+    alternatives = sorted(
+        (candidate for candidate in candidates if candidate.label != primary.label),
+        key=lambda candidate: candidate.confidence,
+        reverse=True,
+    )
+    seen = {primary.label}
+    combined_ranking = [primary]
+    for candidate in alternatives:
+        if candidate.label not in seen:
+            seen.add(candidate.label)
+            combined_ranking.append(candidate)
+        if len(combined_ranking) >= DEFAULT_TOP_K:
+            break
+
     return CombinedPrediction(
         label=primary.label,
         confidence=primary.confidence,
@@ -144,7 +166,7 @@ def combine(
         method=method,
         word=word_top,
         sources=tuple(sources),
-        top_predictions=tuple(letter_ranking),
+        top_predictions=tuple(combined_ranking),
     )
 
 

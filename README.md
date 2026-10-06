@@ -67,12 +67,14 @@ uvicorn backend.app.main:app --reload --host 0.0.0.0 --port 10000
 This serves the alphabet and fingerspelling models. To also enable the word model:
 
 ```bash
-# 1. Restore the real 57 MB I3D checkpoint (the repository holds an LFS pointer)
-git lfs pull
-
-# 2. Install PyTorch and OpenCV (CPU wheels keep the download small)
+# Install PyTorch and OpenCV (CPU wheels keep the download small)
 pip install -r backend/requirements-word.txt \
   --extra-index-url https://download.pytorch.org/whl/cpu
+
+# Optional: download ahead of time. If the checkout still contains the Git LFS
+# pointer, SignBridge downloads and SHA-256-verifies the 57 MB checkpoint on the
+# first word prediction automatically.
+git lfs pull
 ```
 
 `GET /api/health` then reports `"word": {"available": true, ...}` and the Word tab in the UI lights up.
@@ -222,6 +224,9 @@ curl -H "Content-Type: application/json" \
 | `FINGERSPELLING_MODEL_PATH` / `FINGERSPELLING_LABELS_PATH` | bundled model | Override fingerspelling artifacts |
 | `WORD_MODEL_PATH` / `WORD_LABELS_PATH` / `WORD_NORMALIZATION_PATH` | bundled model | Override word classifier artifacts |
 | `I3D_WEIGHTS_PATH` / `I3D_CODE_DIR` | bundled paths | Override I3D checkpoint and module location |
+| `WORD_AUTO_DOWNLOAD` | `1` | Securely download a missing/LFS-pointer I3D checkpoint on the first word prediction |
+| `I3D_WEIGHTS_URL` | pinned repository asset | Override the checkpoint download URL |
+| `I3D_WEIGHTS_SHA256` | pinned checksum | Expected checkpoint SHA-256; a mismatched download is discarded |
 | `TWILIO_ACCOUNT_SID` | *(unset)* | Twilio Account SID — required for real emergency delivery |
 | `TWILIO_AUTH_TOKEN` | *(unset)* | Twilio Auth Token |
 | `TWILIO_FROM_NUMBER` | *(unset)* | Your Twilio number (E.164) that sends the SMS and places the call |

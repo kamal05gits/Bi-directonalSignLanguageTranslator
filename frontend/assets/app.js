@@ -614,24 +614,8 @@ function showCombinedPrediction(data) {
   if (data.agreement === false) chips.push('<span class="chip warn">letter models disagreed</span>');
   els.modelChips.innerHTML = chips.join('');
   els.modelChips.hidden = !chips.length;
-  // Offer the word model's candidate when the consensus landed on a letter.
-  if (data.word && data.word.label !== data.label) {
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.className = 'word-candidate';
-    button.textContent = `Word: ${data.word.label} ${Math.round(data.word.confidence * 100)}%`;
-    button.onclick = () => {
-      currentLabel = data.word.label;
-      els.letter.textContent = currentLabel;
-      els.letter.classList.add('word');
-      els.addButton.disabled = false;
-      els.addButton.textContent = 'Add word';
-    };
-    els.alternatives.hidden = false;
-    if (!els.alternatives.textContent.trim()) els.alternatives.textContent = 'Maybe ';
-    els.alternatives.appendChild(document.createTextNode(' '));
-    els.alternatives.appendChild(button);
-  }
+  // The API's combined ranking now includes a word candidate (including for
+  // word-only requests), so it is rendered once by showPrediction above.
 }
 
 async function postForm(url, form) {
@@ -672,8 +656,11 @@ function showPrediction(data) {
   els.alternatives.innerHTML = alternatives.length ? `Maybe ${alternatives.map(item => `<button type="button" data-label="${item.label}">${item.label} ${Math.round(item.confidence * 100)}%</button>`).join('')}` : '';
   els.alternatives.querySelectorAll('button').forEach(button => button.onclick = () => {
     currentLabel = button.dataset.label;
+    const isWord = String(currentLabel).trim().length > 1;
     els.letter.textContent = currentLabel;
+    els.letter.classList.toggle('word', isWord);
     els.addButton.disabled = false;
+    els.addButton.textContent = isWord ? 'Add word' : config.addLabel;
     els.predictionState.textContent = `Using your pick: ${currentLabel.toUpperCase()}`;
   });
 }
