@@ -1,5 +1,6 @@
 import numpy as np
 
+
 class FeatureScaler:
     def __init__(self): self.mean = self.std = None
     def fit(self, values):

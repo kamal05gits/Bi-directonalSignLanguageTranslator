@@ -33,9 +33,9 @@ from typing import Annotated
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from PIL import Image, ImageOps
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from starlette.concurrency import run_in_threadpool
-from PIL import Image, ImageOps
 
 from .language.translator import DictionaryTranslator
 from .routes import continuous as continuous_routes

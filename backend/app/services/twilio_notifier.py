@@ -32,7 +32,9 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from xml.sax.saxutils import escape
 
-from .keras_classifier import Prediction  # noqa: F401  (keeps the services layer import graph simple)
+from .keras_classifier import (
+    Prediction,  # noqa: F401  (keeps the services layer import graph simple)
+)
 
 # <Say> language/voice pairs for translated phrases. English always works;
 # other languages fall back to the English phrase so the call never fails on

@@ -8,7 +8,6 @@ import json
 
 import numpy as np
 import pytest
-
 from app.services.fingerspelling_predictor import FEATURE_DIM, FingerspellingPredictor
 from app.services.keras_classifier import LazyKerasClassifier, read_labels
 from app.services.word_predictor import WordPredictor, is_lfs_pointer

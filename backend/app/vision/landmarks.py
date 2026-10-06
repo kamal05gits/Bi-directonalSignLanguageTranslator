@@ -1,4 +1,5 @@
 import numpy as np
+
 from .hand_detector import HandDetectionResult
 
 FEATURE_DIM = 126
