@@ -1,0 +1,12 @@
+CNN MODEL EVALUATION SUMMARY
+============================
+Model: CNN
+Classes: 61
+Input shape: [63]
+Samples represented by confusion matrix: 34333
+Test loss: 0.0905194953083992
+Test accuracy: 97.01%
+Top-k accuracy: 0.9982523918151855
+Macro F1: 0.9523341548777002
+Weighted F1: 0.9699415703384603
+Training date in config: 2026-03-02T14:59:19.977859

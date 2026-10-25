@@ -1,0 +1,38 @@
+# Signora — local requirements (Python 3.11)
+# Same pinned versions the Hugging Face Space uses, minus dev/test tools.
+
+# Web
+Flask==2.3.3
+Flask-CORS==4.0.0
+
+# Computer vision
+opencv-python==4.8.1.78
+mediapipe==0.10.7
+
+# Machine learning
+tensorflow==2.13.0
+numpy==1.24.3
+scikit-learn==1.3.0
+
+# Data (needed only for retraining / preprocessing)
+pandas==2.0.3
+matplotlib==3.7.2
+seaborn==0.12.2
+
+# NLP
+nltk==3.8.1
+spacy==3.6.1
+
+# Text-to-speech
+pyttsx3==2.90
+gTTS==2.3.2
+pygame==2.5.2
+
+# Translation (used by the "translate" feature)
+googletrans==4.0.0-rc.1
+
+# Utilities
+python-dotenv==1.0.0
+Pillow==10.0.0
+requests==2.31.0
+psutil==5.9.5

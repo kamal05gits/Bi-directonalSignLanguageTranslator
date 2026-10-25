@@ -1,0 +1,21 @@
+{
+  "model_type": "CNN",
+  "input_shape": [
+    63
+  ],
+  "num_classes": 61,
+  "test_loss": 0.0905194953083992,
+  "test_accuracy": 0.9700579643249512,
+  "test_accuracy_percent": 97.01,
+  "test_top_k_accuracy": 0.9982523918151855,
+  "macro_precision": 0.9552490706285091,
+  "macro_recall": 0.953401204637289,
+  "macro_f1": 0.9523341548777002,
+  "weighted_precision": 0.9717955269764604,
+  "weighted_recall": 0.9700579617277838,
+  "weighted_f1": 0.9699415703384603,
+  "total_test_samples_in_confusion_matrix": 34333,
+  "training_date": "2026-03-02T14:59:19.977859",
+  "epochs_configured": 100,
+  "note": "Metrics and confusion matrix are based on the uploaded evaluation_results.json."
+}

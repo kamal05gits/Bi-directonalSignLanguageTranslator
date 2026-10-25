@@ -1,0 +1,29 @@
+{
+    "name": "Signora — ISL Recognition",
+    "short_name": "Signora",
+    "description": "AI-powered Indian Sign Language recognition, learning, and translation",
+    "start_url": "/",
+    "display": "standalone",
+    "background_color": "#07090f",
+    "theme_color": "#0b1416",
+    "orientation": "portrait-primary",
+    "icons": [
+        {
+            "src": "/static/icons/icon-192.png",
+            "sizes": "192x192",
+            "type": "image/png",
+            "purpose": "any maskable"
+        },
+        {
+            "src": "/static/icons/icon-512.png",
+            "sizes": "512x512",
+            "type": "image/png",
+            "purpose": "any maskable"
+        }
+    ],
+    "categories": [
+        "education",
+        "accessibility"
+    ],
+    "lang": "en"
+}

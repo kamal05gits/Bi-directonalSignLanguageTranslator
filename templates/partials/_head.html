@@ -1,0 +1,15 @@
+<!-- Signora — PWA & SEO Meta Tags -->
+<link href="{{ url_for('static', filename='css/signora.css') }}?v=3" rel="stylesheet">
+<link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
+<meta name="theme-color" content="#0b1416">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="icon" type="image/png" href="{{ url_for('static', filename='icons/icon-192.png') }}">
+<link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='img/signora-logo.svg') }}">
+<link rel="apple-touch-icon" href="{{ url_for('static', filename='icons/icon-192.png') }}">
+<meta name="description" content="Signora — AI-powered Indian Sign Language recognition, learning, and translation">
+<script>
+    if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('/static/js/sw.js').catch(() => { });
+    }
+</script>

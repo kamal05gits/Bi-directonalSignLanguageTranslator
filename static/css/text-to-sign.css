@@ -1,0 +1,284 @@
+.text-sign-page {
+    max-width: 1180px;
+}
+
+.text-sign-page h1 {
+    color: var(--text-primary);
+    font-family: var(--font-display);
+    font-size: clamp(2rem, 4vw, 3rem);
+    font-weight: 800;
+}
+
+.text-sign-eyebrow,
+.text-sign-label {
+    color: var(--primary);
+    font-size: 0.8rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.text-sign-intro,
+.text-sign-hint,
+.text-sign-footer {
+    color: var(--text-muted);
+}
+
+.text-sign-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    color: var(--text-primary);
+}
+
+.text-sign-card .card-header {
+    background: var(--bg-elevated);
+    border-bottom: 1px solid var(--border);
+    color: var(--text-primary);
+    padding: 1rem 1.25rem;
+}
+
+.text-sign-input,
+.sign-speed-select,
+.sign-avatar-select {
+    background-color: var(--bg-input);
+    border-color: var(--border-strong);
+    color: var(--text-primary);
+}
+
+.text-sign-input:focus,
+.sign-speed-select:focus,
+.sign-avatar-select:focus {
+    background-color: var(--bg-input);
+    border-color: var(--primary);
+    box-shadow: 0 0 0 0.2rem var(--primary-glow);
+    color: var(--text-primary);
+}
+
+.text-sign-input::placeholder {
+    color: var(--text-muted);
+}
+
+.text-sign-hint {
+    font-size: 0.78rem;
+}
+
+.btn-sign-primary {
+    background: var(--gradient-primary);
+    border: 0;
+    color: #06231a;
+    font-weight: 700;
+}
+
+.btn-sign-primary:hover,
+.btn-sign-primary:focus-visible {
+    color: #06231a;
+    filter: brightness(1.08);
+}
+
+.btn-sign-secondary,
+.example-phrase {
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-strong);
+    color: var(--text-primary);
+}
+
+.btn-sign-secondary:hover:not(:disabled),
+.example-phrase:hover {
+    background: rgba(66, 196, 152, 0.14);
+    border-color: var(--primary);
+    color: var(--text-primary);
+}
+
+.btn-sign-secondary:disabled {
+    opacity: 0.4;
+}
+
+.text-sign-note {
+    background: rgba(66, 196, 152, 0.08);
+    border: 1px solid rgba(66, 196, 152, 0.2);
+    border-radius: 0.75rem;
+    color: var(--text-secondary);
+    font-size: 0.84rem;
+    line-height: 1.6;
+    padding: 0.85rem 1rem;
+}
+
+.text-sign-note i {
+    color: var(--primary);
+}
+
+.sequence-count,
+.sign-step-counter {
+    color: var(--text-muted);
+    font-size: 0.82rem;
+    white-space: nowrap;
+}
+
+.sign-stage {
+    align-items: center;
+    background:
+        radial-gradient(ellipse at center, rgba(66, 196, 152, 0.08), transparent 65%),
+        var(--bg-input);
+    border: 1px solid var(--border);
+    border-radius: 1rem;
+    display: flex;
+    height: clamp(250px, 34vh, 370px);
+    justify-content: center;
+    overflow: hidden;
+    position: relative;
+}
+
+.sign-placeholder {
+    color: var(--text-muted);
+    text-align: center;
+}
+
+.sign-placeholder i {
+    color: var(--primary);
+    opacity: 0.75;
+}
+
+.sign-frame-video {
+    height: 100%;
+    object-fit: contain;
+    padding: 0.75rem;
+    width: 100%;
+}
+
+.sign-frame-text {
+    align-items: center;
+    color: var(--primary);
+    display: flex;
+    font-family: var(--font-display);
+    font-size: clamp(5rem, 18vw, 10rem);
+    font-weight: 800;
+    height: 100%;
+    justify-content: center;
+    width: 100%;
+}
+
+.sign-step-title {
+    color: var(--text-primary);
+    font-size: 1.05rem;
+    font-weight: 700;
+}
+
+.sign-step-detail {
+    color: var(--text-muted);
+    font-size: 0.82rem;
+    min-height: 1.25rem;
+}
+
+.sign-progress {
+    background: var(--bg-elevated);
+    height: 0.55rem;
+}
+
+.sign-progress .progress-bar {
+    background: var(--gradient-primary);
+    transition: width 0.2s ease;
+}
+
+.sign-speed-label,
+.sign-loop-control {
+    color: var(--text-secondary);
+    font-size: 0.86rem;
+}
+
+.sign-speed-select {
+    max-width: 90px;
+}
+
+.sign-loop-control {
+    align-items: center;
+    display: inline-flex;
+    gap: 0.35rem;
+}
+
+.sign-loop-control .form-check-input {
+    margin: 0;
+}
+
+.sign-sequence {
+    display: flex;
+    gap: 0.5rem;
+    max-height: 170px;
+    overflow: auto;
+    padding: 0.25rem 0.1rem 0.6rem;
+}
+
+.sign-sequence-step {
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: 0.7rem;
+    color: var(--text-secondary);
+    flex: 0 0 auto;
+    min-width: 70px;
+    padding: 0.45rem 0.55rem;
+    text-align: center;
+}
+
+.sign-sequence-step span {
+    display: block;
+    font-size: 0.72rem;
+    max-width: 110px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.sign-sequence-step small {
+    color: var(--text-muted);
+    font-size: 0.62rem;
+}
+
+.sign-sequence-step.active {
+    background: rgba(66, 196, 152, 0.16);
+    border-color: var(--primary);
+    color: var(--text-primary);
+}
+
+.sign-sequence-step:focus-visible,
+.example-phrase:focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: 2px;
+}
+
+.text-sign-status {
+    color: var(--text-secondary);
+    font-size: 0.84rem;
+    min-height: 1.3rem;
+}
+
+.text-sign-status.is-error {
+    color: #ff9d8c;
+}
+
+@media (max-width: 575.98px) {
+    .text-sign-page {
+        margin-top: 1.5rem !important;
+    }
+
+    .text-sign-card .card-body {
+        padding: 1.15rem !important;
+    }
+
+    .sign-stage {
+        height: 250px;
+    }
+
+    .sign-speed-label {
+        margin-left: auto;
+    }
+}
+
+body[data-theme="light"] .text-sign-card {
+    background: rgba(255, 255, 255, 0.92);
+}
+
+body[data-theme="light"] .text-sign-input,
+body[data-theme="light"] .sign-speed-select,
+body[data-theme="light"] .sign-avatar-select {
+    background-color: rgba(255, 255, 255, 0.78);
+    color: var(--text-primary);
+}

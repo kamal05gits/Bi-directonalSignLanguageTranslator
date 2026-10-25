@@ -1,0 +1,10 @@
+SIGNORA TEST EVALUATION
+
+test_accuracy: 0.7560975609756098
+test_samples: 82
+macro_precision: 0.7493284493284493
+macro_recall: 0.7510416666666666
+macro_f1_score: 0.7358933255016173
+weighted_f1_score: 0.7435088137148947
+class_names: ['accident', 'call', 'doctor', 'help', 'hot', 'lose', 'pain', 'thief']
+generated_at: 2026-10-22T07:24:28

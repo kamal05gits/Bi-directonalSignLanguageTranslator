@@ -1,0 +1,13 @@
+SIGNORA MODEL TEST METRICS
+==========================
+Model: BiGRU + MediaPipe Holistic Landmarks
+Classes: 262
+Test samples: 857
+Sequence length: 40 frames
+Features per frame: 225
+Test loss: 0.7708
+Test accuracy: 81.33%
+Macro F1: 0.8064
+Weighted F1: 0.8045
+Epochs recorded in notebook output: 50
+Best validation accuracy in recorded epoch logs: 80.19%

@@ -1,0 +1,14 @@
+{
+  "model": "BiGRU + MediaPipe Holistic Landmarks",
+  "classes": 262,
+  "test_samples": 857,
+  "sequence_length_frames": 40,
+  "features_per_frame": 225,
+  "test_loss": 0.7708,
+  "test_accuracy": 0.813302,
+  "macro_f1": 0.8064,
+  "weighted_f1": 0.8045,
+  "training_epochs_logged": 50,
+  "best_validation_accuracy_logged": 0.8019,
+  "note": "Metrics copied/extracted from the uploaded notebook outputs and classification report."
+}

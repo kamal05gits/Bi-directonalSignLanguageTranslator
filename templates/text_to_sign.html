@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Text to Sign — Signora</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.1.3/css/bootstrap.min.css" rel="stylesheet">
+    <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet">
+    <link href="{{ url_for('static', filename='css/text-to-sign.css') }}" rel="stylesheet">
+    {% include 'partials/_head.html' %}
+</head>
+
+<body>
+    {% include 'partials/_navbar.html' %}
+
+    <main class="container my-4 text-sign-page">
+        <header class="text-center mb-4">
+            <p class="text-sign-eyebrow mb-2"><i class="fas fa-hands me-2"></i>Indian Sign Language</p>
+            <h1 class="mb-2">Text to Sign</h1>
+            <p class="text-sign-intro mb-0">Turn a phrase into a step-by-step sequence of animated sign videos.</p>
+        </header>
+
+        <div class="row g-4">
+            <section class="col-lg-5" aria-labelledby="text-entry-title">
+                <div class="card text-sign-card h-100">
+                    <div class="card-body p-4">
+                        <h2 id="text-entry-title" class="h5 mb-3">Enter a phrase</h2>
+                        <form id="text-to-sign-form">
+                            <label for="text-sign-language" class="form-label">Phrase language</label>
+                            <select id="text-sign-language" class="form-select mb-3">
+                                <option value="en" data-locale="en-IN">English</option>
+                                <option value="ta" data-locale="ta-IN">Tamil</option>
+                                <option value="te" data-locale="te-IN">Telugu</option>
+                                <option value="hi" data-locale="hi-IN">Hindi</option>
+                                <option value="kn" data-locale="kn-IN">Kannada</option>
+                                <option value="ml" data-locale="ml-IN">Malayalam</option>
+                                <option value="bn" data-locale="bn-IN">Bengali</option>
+                                <option value="ur" data-locale="ur-PK">Urdu</option>
+                            </select>
+                            <label for="text-sign-avatar" class="form-label">Signing avatar</label>
+                            <select id="text-sign-avatar" class="form-select sign-avatar-select mb-3">
+                                <option value="Sanket">Sanket</option>
+                                <option value="Girish">Girish</option>
+                            </select>
+                            <label for="text-to-sign-input" class="form-label">Text to sign</label>
+                            <textarea id="text-to-sign-input" class="form-control text-sign-input" rows="5"
+                                maxlength="500" placeholder="Type or speak a phrase in your selected language" required></textarea>
+                            <div class="d-flex gap-2 mt-2">
+                                <button type="button" id="text-sign-listen-btn" class="btn btn-sign-secondary">
+                                    <i class="fas fa-microphone me-2"></i>Speak phrase
+                                </button>
+                            </div>
+                            <label for="text-sign-english" class="form-label mt-3 mb-1">English for sign sequence</label>
+                            <textarea id="text-sign-english" class="form-control" rows="2" readonly
+                                placeholder="English translation will appear here"></textarea>
+                            <div class="d-flex justify-content-between mt-2 text-sign-hint">
+                                <span>Non-English phrases are translated to English before showing signs.</span>
+                                <span><span id="character-count">0</span>/500</span>
+                            </div>
+                            <div class="d-flex gap-2 mt-3">
+                                <button type="button" id="clear-text-btn" class="btn btn-sign-secondary"
+                                    aria-label="Clear text and signs" title="Clear">
+                                    <i class="fas fa-eraser"></i>
+                                </button>
+                            </div>
+                        </form>
+
+                        <div class="mt-4">
+                            <h3 class="text-sign-label mb-2">Try an example</h3>
+                            <div class="d-flex flex-wrap gap-2" id="example-phrases">
+                                <button type="button" class="btn btn-sm example-phrase"
+                                    data-example="Hello, how are you?">Hello, how are you?</button>
+                                <button type="button" class="btn btn-sm example-phrase"
+                                    data-example="Thank you!">Thank you!</button>
+                                <button type="button" class="btn btn-sm example-phrase"
+                                    data-example="I love my family">I love my family</button>
+                            </div>
+                        </div>
+
+                        <div class="text-sign-note mt-4" role="note">
+                            <i class="fas fa-circle-info me-2"></i>
+                            Word signs and finger-spelled letters play as animated clips. Words without a matching
+                            clip are finger-spelled when letter clips are available.
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section class="col-lg-7" aria-labelledby="sign-player-title">
+                <div class="card text-sign-card sign-player-card h-100">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h2 id="sign-player-title" class="h5 mb-0">Sign sequence</h2>
+                        <span id="sequence-count" class="sequence-count">No signs yet</span>
+                    </div>
+                    <div class="card-body p-4 d-flex flex-column">
+                        <div class="sign-stage" aria-live="polite" aria-atomic="true">
+                            <div id="sign-placeholder" class="sign-placeholder">
+                                <i class="fas fa-hands fa-3x mb-3" aria-hidden="true"></i>
+                                <p class="mb-0">Your sign sequence will appear here</p>
+                            </div>
+                            <video id="sign-frame-video" class="sign-frame-video" playsinline preload="metadata"
+                                hidden></video>
+                            <div id="sign-frame-text" class="sign-frame-text" hidden></div>
+                        </div>
+
+                        <div class="mt-3">
+                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                <div>
+                                    <div id="sign-step-title" class="sign-step-title">Ready when you are</div>
+                                    <div id="sign-step-detail" class="sign-step-detail" aria-live="polite"></div>
+                                </div>
+                                <span id="sign-step-counter" class="sign-step-counter">0 / 0</span>
+                            </div>
+                            <div class="progress sign-progress" role="progressbar" aria-label="Sign sequence progress"
+                                aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+                                <div id="sign-progress-bar" class="progress-bar"></div>
+                            </div>
+                        </div>
+
+                        <div class="d-flex flex-wrap align-items-center gap-2 mt-3 sign-controls">
+                            <button type="button" id="previous-sign-btn" class="btn btn-sign-secondary"
+                                aria-label="Previous sign" title="Previous sign" disabled>
+                                <i class="fas fa-backward-step"></i>
+                            </button>
+                            <button type="button" id="play-signs-btn" class="btn btn-sign-primary" disabled>
+                                <i class="fas fa-play me-2"></i>Play
+                            </button>
+                            <button type="button" id="next-sign-btn" class="btn btn-sign-secondary"
+                                aria-label="Next sign" title="Next sign" disabled>
+                                <i class="fas fa-forward-step"></i>
+                            </button>
+                            <label for="playback-speed" class="ms-sm-auto sign-speed-label">Speed</label>
+                            <select id="playback-speed" class="form-select sign-speed-select" aria-label="Playback speed">
+                                <option value="0.5">0.5×</option>
+                                <option value="0.75">0.75×</option>
+                                <option value="1" selected>1×</option>
+                                <option value="1.5">1.5×</option>
+                                <option value="2">2×</option>
+                            </select>
+                            <label class="form-check sign-loop-control mb-0">
+                                <input class="form-check-input" type="checkbox" id="loop-signs">
+                                <span class="form-check-label">Loop</span>
+                            </label>
+                        </div>
+
+                        <div class="mt-4">
+                            <h3 class="text-sign-label mb-2">Sequence steps</h3>
+                            <div id="sign-sequence" class="sign-sequence" aria-label="Sign sequence steps"></div>
+                        </div>
+                        <p id="text-sign-status" class="text-sign-status mt-3 mb-0" role="status" aria-live="polite">
+                        </p>
+                    </div>
+                </div>
+            </section>
+        </div>
+    </main>
+
+    <footer class="text-center py-3 text-sign-footer">
+        Signora — ISL sign references for accessible communication
+    </footer>
+
+    <script>
+        window.signoraSignCatalog = {{ sign_catalog | tojson }};
+    </script>
+    <script src="{{ url_for('static', filename='js/text-to-sign.js') }}?v=7"></script>
+</body>
+
+</html>

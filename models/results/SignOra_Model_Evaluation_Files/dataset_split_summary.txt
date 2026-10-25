@@ -1,0 +1,10 @@
+SignOra dataset split summary
+=============================
+Total videos: 4284
+Classes: 262
+Train partition before validation_split: 3427
+Keras validation_split: 0.15 of the training partition
+Approximate validation samples: 514
+Approximate effective training samples: 2913
+Test samples: 857
+Note: training/validation counts are approximate because Keras validation_split uses a fraction of the training partition.
