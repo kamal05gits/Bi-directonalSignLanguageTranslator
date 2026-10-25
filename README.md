@@ -8,8 +8,6 @@ pinned: false
 short_description: Bidirectional Indian Sign Language translation with voice and emergency assistance
 ---
 
-Check out the configuration reference at https://huggingface.co/docs/hub/spaces-config-reference
-
 # AI-POWERED CONTEXT-AWARE BIDIRECTIONAL INDIAN SIGN LANGUAGE TRANSLATOR WITH MULTILINGUAL VOICE ASSISTANCE AND EMERGENCY ALERT SYSTEM
 
 ### Submitted by
@@ -33,7 +31,7 @@ Professor & Head, Department of CSE
 
 Government College of Engineering, Bargur – 635104
 
-**Supervisor**
+**Guide**
 
 Mrs. G. Dhivya
 
@@ -82,10 +80,13 @@ choice is saved in this browser.
   normalization statistics must all load successfully before it appears as a selectable model.
   BiGRU uses an 8 FPS capture cadence and MediaPipe's lightweight pose model;
   actual prediction time depends on the computer's processing speed.
-- **Dynamic LSTM** appears when a trained `models/trained/lstm_model.h5` and
-  matching labels are available. It recognizes sequences from 30 consecutive
-  hand-landmark frames. Collect sequence data, train it with
-  `python -m src.models.train_lstm`, then restart the app to load it.
+- **Emergency Signs LSTM** recognizes eight emergency signs (`accident`,
+  `call`, `doctor`, `help`, `hot`, `lose`, `pain`, and `thief`) from a rolling
+  sequence of 30 frames of two-hand landmarks. When the model is loaded and a
+  stable sign is recognized with a score of at least `0.65`, the app attempts
+  to send an SOS through the configured emergency webhook. The model scored
+  75.6% accuracy on its 82-sample test set; it is experimental and is not a
+  validated emergency safety system.
 
 Only models that are ready for live camera inference are listed in the selector.
 `/api/models` reports the current load status of those connected models.
@@ -93,13 +94,10 @@ Frame predictions are shown only when they exceed `CONFIDENCE_THRESHOLD` and
 agree over `PREDICTION_MIN_STABLE_FRAMES` within the
 `PREDICTION_SMOOTHING_WINDOW`. A held sign is committed once; show no hand to
 re-arm the same sign. An unconfirmed top candidate is shown with its raw model
-score, but is not added to the transcript. The landmark CNN classifies static hand poses and does not
-translate continuous sign-language sentences by itself.
-Emergency Signs predictions also need a raw model score of at least `0.65`
-before they can enter the same consensus filter. This reduces uncertain alerts
-and sign commits, but cannot correct confident model errors: the bundled
-emergency model scored 75.6% on its recorded test set and is experimental, not
-a validated emergency safety system.
+score, but is not added to the transcript. Emergency Signs predictions need a
+raw model score of at least `0.65` before they can enter the same consensus
+filter. The landmark CNN classifies static hand poses and does not translate
+continuous sign-language sentences by itself.
 
 ## Text to Sign
 
